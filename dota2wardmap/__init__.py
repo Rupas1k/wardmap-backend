@@ -16,16 +16,18 @@ def create_app():
     db.init_app(app)
     migrate.init_app(app, db)
 
-    # with app.app_context():
-    #     from main import get_all_matches
-    #     print(get_all_matches())
+    with app.app_context():
+        db.create_all()
+
+        from main import get_all_matches
+        print(get_all_matches())
 
     import views
     app.register_blueprint(views.bp)
 
-    # Flask-APScheduler
-    # from parser import Parser
-    # with app.app_context():
-    #     parser = Parser()
-
     return app
+
+# Flask-APScheduler
+# from parser import Parser
+# with app.app_context():
+#     parser = Parser()
