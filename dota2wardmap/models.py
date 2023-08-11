@@ -1,12 +1,17 @@
-from sqlalchemy import Integer, BigInteger, SmallInteger, Boolean, ForeignKey
+from sqlalchemy import String, Integer, BigInteger, SmallInteger, Boolean, ForeignKey
 from sqlalchemy.orm import mapped_column, relationship
+
 from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+
 
 db = SQLAlchemy()
+migrate = Migrate()
 
 
 class Leagues(db.Model):
     id = mapped_column(Integer, primary_key=True, nullable=False)
+    name = mapped_column(String)
 
     matches = relationship('Matches', back_populates='league')
 
@@ -44,12 +49,5 @@ class Wards(db.Model):
 
 
 if __name__ == '__main__':
-    import dotenv
-
-    dotenv.load_dotenv()
-
     db.create_all()
 
-    # with db.session_scope() as session:
-    #     Base.metadata.create_all(db.engine)
-    # Base.metadata.(db.engine)

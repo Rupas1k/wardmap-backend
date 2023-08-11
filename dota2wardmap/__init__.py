@@ -1,7 +1,9 @@
 import os
 import dotenv
 from flask import Flask
-import views
+
+import sys
+sys.path.insert(0, '.')
 
 
 def create_app():
@@ -10,13 +12,15 @@ def create_app():
     app = Flask(__name__)
     app.config["SQLALCHEMY_DATABASE_URI"] = os.environ['DB_URL']
 
-    from models import db
+    from models import db, migrate
     db.init_app(app)
+    migrate.init_app(app, db)
 
-    with app.app_context():
-        from main import get_all_matches
-        print(get_all_matches())
+    # with app.app_context():
+    #     from main import get_all_matches
+    #     print(get_all_matches())
 
+    import views
     app.register_blueprint(views.bp)
 
     # Flask-APScheduler

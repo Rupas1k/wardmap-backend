@@ -6,5 +6,5 @@ bp = Blueprint('views', __name__)
 
 
 @bp.route('/')
-def hello_world():  # put application's code here
+def hello_world():
     return db.session.scalars(select(Matches.id)).all()
