@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import dotenv
 from gql import gql, Client
@@ -13,6 +14,16 @@ API_TOKEN = os.environ['API_TOKEN']
 
 transport = AIOHTTPTransport(url=API_URL,  headers={'Authorization': API_TOKEN})
 client = Client(transport=transport, fetch_schema_from_transport=True, execute_timeout=30)
+
+
+def fetch_live_games(step, mmr_threshold=8000):
+    query = 'GetLiveGames'
+    matches = execute_graphql(query, {'take': step, 'skip': 0})['live']['matches']
+    i = 0
+    while matches[-1]['averageRank'] > mmr_threshold:
+        matches += execute_graphql(query, {'take': step, 'skip': step * i})['live']['matches']
+        i += 1
+    return matches
 
 
 def fetch_league_games_data(league_id, step, skip=0):
@@ -86,9 +97,9 @@ def parse_match(match_data):
 
 
 def execute_graphql(query_name, params):
-    with open(f'./graphql/{query_name}.graphql', encoding='utf8') as query:
+    with open(f'{os.environ["PYTHONPATH"]}/graphql/{query_name}.graphql', encoding='utf8') as query:
         return client.execute(gql(query.read()), variable_values=params)
 
 
 if __name__ == '__main__':
-    pass
+    print(len(fetch_live_games(150)))
