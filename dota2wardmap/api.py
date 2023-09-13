@@ -1,13 +1,12 @@
 import os
-import sys
-import json
 import dotenv
+from pathlib import Path
 from gql import gql, Client
 from gql.transport.aiohttp import AIOHTTPTransport
 
+from definitions import ROOT_DIR
 
 dotenv.load_dotenv()
-
 
 API_URL = 'https://api.stratz.com/graphql'
 API_TOKEN = os.environ['API_TOKEN']
@@ -23,7 +22,7 @@ def fetch_live_games(step, mmr_threshold=8000):
     while matches[-1]['averageRank'] > mmr_threshold:
         matches += execute_graphql(query, {'take': step, 'skip': step * i})['live']['matches']
         i += 1
-    return matches
+    return [match for match in matches if match['averageRank'] > mmr_threshold]
 
 
 def fetch_league_games_data(league_id, step, skip=0):
@@ -97,7 +96,7 @@ def parse_match(match_data):
 
 
 def execute_graphql(query_name, params):
-    with open(f'{os.environ["PYTHONPATH"]}/graphql/{query_name}.graphql', encoding='utf8') as query:
+    with open(ROOT_DIR / Path(f'graphql/{query_name}.graphql'), encoding='utf8') as query:
         return client.execute(gql(query.read()), variable_values=params)
 
 

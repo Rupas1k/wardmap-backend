@@ -27,6 +27,7 @@ class Matches(db.Model):
     league_id = mapped_column(Integer, ForeignKey('leagues.id'))
     tournament_id = mapped_column(Integer, ForeignKey('tournaments.id'))
     duration = mapped_column(SmallInteger)
+    average_rank = mapped_column(SmallInteger)
 
     league = relationship('Leagues', back_populates='matches')
     tournament = relationship('Tournaments', back_populates='matches')

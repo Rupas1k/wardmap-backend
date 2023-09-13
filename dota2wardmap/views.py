@@ -6,7 +6,6 @@ from livegames.work_queue import WorkQueue
 
 bp = Blueprint('views', __name__)
 work_queue = WorkQueue()
-print(work_queue.get())
 
 
 @bp.route('/get_work_queue')
@@ -20,6 +19,7 @@ def send_work_queue():
 def receive_ward_data(match_id):
     match_id = int(match_id)
     data = request.get_json(force=True)
+    match_data = data.pop(0)
     wards = []
     for ward_data in data:
         if ward_data['event'] == 'expired' or 'guys' in ward_data['npc_killed']:
@@ -47,7 +47,10 @@ def receive_ward_data(match_id):
             'dire_networth': ward_data['direNetworth'],
         }
         wards.append(ward)
-    db.session.execute(insert(Matches).values(id=match_id))
+    db.session.execute(insert(Matches).values(id=match_id,
+                                              league_id=work_queue.get_dict()[match_id]['leagueId'],
+                                              average_rank=work_queue.get_dict()[match_id]['averageRank'],
+                                              duration=match_data['duration']))
     db.session.execute(insert(Wards).values(wards))
     db.session.commit()
     work_queue.remove(match_id)

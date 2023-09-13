@@ -4,11 +4,6 @@ query GetLeagueMatches($take: Int!, $skip: Int!){
             matchId
             leagueId
             averageRank
-            buildingState
-            completed
-            isUpdating
-            isParsing
-            gameState
         }
     }
 }

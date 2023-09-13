@@ -1,4 +1,3 @@
-import sqlalchemy as sa
 from sqlalchemy import select
 from models import db, Matches
 from flask import Blueprint
@@ -14,17 +13,20 @@ LIVE_MATCHES_STEP = 50
 MMR_THRESHOLD = 8000
 
 
-@scheduler.task('interval', id='do_job_1', seconds=300)
+@scheduler.task('interval', id='parser', seconds=600)
 def parse():
     with scheduler.app.app_context():
         print('Task is running')
+
         live_games = api.fetch_live_games(LIVE_MATCHES_STEP, MMR_THRESHOLD)
-        ids = set([match['matchId'] for match in live_games])
+        matches = dict((match['matchId'], match) for match in live_games)
+        ids = set(list(matches.keys()))
 
         db_ids = set(db.session.execute(select(Matches.id).filter(Matches.id.in_(ids))).scalars())
 
-        work_queue.add(ids - db_ids)
+        to_add = dict((matches[match_id]['matchId'], matches[match_id]) for match_id in matches if matches[match_id]['matchId'] in ids - db_ids)
+
+        work_queue.add(to_add)
 
         print(f'{len(live_games)} games added to work queue {len(ids)}')
-        print(f'{len(work_queue._queue)} wq length')
-
+        print(f'{len(work_queue.get())} wq length')
