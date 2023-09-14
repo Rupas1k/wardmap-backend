@@ -1,6 +1,5 @@
 .idea
 .env
-plots
 description.txt
 dota2wardmap/work_queue.json
 dota2wardmap/graphql/graphql.config.yml
