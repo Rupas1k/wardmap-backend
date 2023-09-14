@@ -32,7 +32,7 @@ def create_app():
         db.create_all()
 
         livegames.parser.scheduler.start()
-        livegames.parser.parse()
+        # livegames.parser.parse()
 
         from main import main
         # main()

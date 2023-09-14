@@ -48,8 +48,12 @@ def receive_ward_data(match_id):
         }
         wards.append(ward)
     db.session.execute(insert(Matches).values(id=match_id,
-                                              league_id=work_queue.get_dict()[match_id]['leagueId'],
+                                              league_id=match_data['league'],
                                               average_rank=work_queue.get_dict()[match_id]['averageRank'],
+                                              tournament_id=match_data['tournament'],
+                                              game_version=match_data['version'],
+                                              date=match_data['date'],
+                                              region=match_data['region'],
                                               duration=match_data['duration']))
     db.session.execute(insert(Wards).values(wards))
     db.session.commit()

@@ -2,7 +2,6 @@ query GetLeagueMatches($take: Int!, $skip: Int!){
     live{
         matches(request: {take: $take, skip: $skip, orderBy: AVERAGE_RANK, isCompleted: true}){
             matchId
-            leagueId
             averageRank
         }
     }
