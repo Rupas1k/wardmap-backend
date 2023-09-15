@@ -7,13 +7,12 @@ from gql.transport.aiohttp import AIOHTTPTransport
 
 from definitions import ROOT_DIR
 
-
 dotenv.load_dotenv()
 
 API_URL = 'https://api.stratz.com/graphql'
 API_TOKEN = os.environ['API_TOKEN']
 
-transport = AIOHTTPTransport(url=API_URL,  headers={'Authorization': API_TOKEN})
+transport = AIOHTTPTransport(url=API_URL, headers={'Authorization': API_TOKEN})
 client = Client(transport=transport, fetch_schema_from_transport=True, execute_timeout=30)
 
 

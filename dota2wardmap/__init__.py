@@ -6,7 +6,6 @@ from flask import Flask
 
 from definitions import db, migrate, socket, redis_store, scheduler
 
-
 sys.path.insert(0, '.')
 dotenv.load_dotenv()
 
@@ -22,14 +21,16 @@ def create_app():
     redis_store.init_app(app)
     scheduler.init_app(app)
 
-    import views, sock, livegames.parser
+    import sock
+    import views
+    import parser
     app.register_blueprint(views.bp)
     app.register_blueprint(sock.bp)
-    app.register_blueprint(livegames.parser.bp)
+    app.register_blueprint(parser.bp)
 
     with app.app_context():
         db.create_all()
         scheduler.start()
-        # livegames.parser.parse()
+        parser.parse()
 
     return app
