@@ -1,10 +1,12 @@
 import os
 import dotenv
+
 from pathlib import Path
 from gql import gql, Client
 from gql.transport.aiohttp import AIOHTTPTransport
 
 from definitions import ROOT_DIR
+
 
 dotenv.load_dotenv()
 

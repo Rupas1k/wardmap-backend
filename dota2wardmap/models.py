@@ -1,12 +1,7 @@
 from sqlalchemy import String, Integer, BigInteger, SmallInteger, Float, Boolean, ForeignKey
 from sqlalchemy.orm import mapped_column, relationship
 
-from flask_sqlalchemy import SQLAlchemy
-from flask_migrate import Migrate
-
-
-db = SQLAlchemy()
-migrate = Migrate()
+from definitions import db
 
 
 class Leagues(db.Model):

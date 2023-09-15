@@ -1,8 +1,17 @@
 import json
-from models import db, Wards, Matches
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.cluster import HDBSCAN
+
+import sqlalchemy as sa
 from flask import Blueprint, Response, request
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
+
+from models import db, Wards, Matches
 from livegames.work_queue import WorkQueue
+
 
 bp = Blueprint('views', __name__)
 work_queue = WorkQueue()
@@ -11,7 +20,7 @@ work_queue = WorkQueue()
 @bp.route('/get_work_queue')
 def send_work_queue():
     response = Response(json.dumps(work_queue.get()))
-    response.headers['Content/type'] = 'Application/json'
+    response.headers['Content-type'] = 'Application/json'
     return response
 
 

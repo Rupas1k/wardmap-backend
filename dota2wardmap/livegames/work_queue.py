@@ -4,6 +4,7 @@ import json
 from definitions import ROOT_DIR
 
 
+# TODO Rewrite using Redis
 class WorkQueue:
     def __init__(self):
         self._queue_dict = self._open_work_queue()

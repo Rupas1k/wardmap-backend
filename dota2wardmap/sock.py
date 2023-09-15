@@ -1,15 +1,17 @@
 import json
 
-from flask_sock import Server, Sock, Blueprint
+from flask_sock import Server, Blueprint
+from sqlalchemy import select
 
-from models import Matches, Wards, db
-from sqlalchemy import select, desc
+from models import Wards, db
+
+from definitions import socket
+
 
 bp = Blueprint('sock', __name__)
-sock = Sock()
 
 
-@sock.route('/ws')
+@socket.route('/ws')
 def echo(ws: Server):
     while True:
         data = ws.receive()

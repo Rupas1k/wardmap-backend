@@ -1,13 +1,13 @@
 from sqlalchemy import select
-from models import db, Matches
 from flask import Blueprint
-from flask_apscheduler import APScheduler
-from views import work_queue
 
 import api
+from models import db, Matches
+from views import work_queue
+from definitions import scheduler
+
 
 bp = Blueprint('parser', __name__)
-scheduler = APScheduler()
 
 LIVE_MATCHES_STEP = 50
 MMR_THRESHOLD = 8000
