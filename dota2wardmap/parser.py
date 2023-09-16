@@ -23,8 +23,10 @@ def parse():
         matches = dict((match['matchId'], match) for match in live_games)
         ids = set(list(matches.keys()))
 
-        db_ids = set(db.session.execute(select(Matches.id).filter(Matches.id.in_(ids))).scalars())
+        db_ids = set(db.session.execute(select(Matches.id).filter(Matches.id.in_(ids))).scalars().all())
         redis_ids = set(int(json.loads(replay)['matchId']) for replay in redis_store.lrange('replays', 0, -1))
+
+        print(set(db.session.execute(select(Matches.id).filter(Matches.id.in_(redis_ids))).scalars().all()))
 
         to_add = list(matches[match_id] for match_id in matches if matches[match_id]['matchId'] in ids - db_ids - redis_ids)
 

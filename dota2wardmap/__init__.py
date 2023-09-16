@@ -1,12 +1,10 @@
 import os
-import sys
 import dotenv
 
 from flask import Flask
 
 from definitions import db, migrate, socket, redis_store, scheduler
 
-sys.path.insert(0, '.')
 dotenv.load_dotenv()
 
 

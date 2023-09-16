@@ -15,11 +15,41 @@ from definitions import redis_store
 bp = Blueprint('views', __name__)
 
 
+@bp.route('/clusters')
+def clusters():
+    data = db.session.execute(
+        select(Wards.duration, Wards.x_pos, Wards.y_pos, Wards.z_pos, Wards.is_radiant, Wards.is_destroyed,
+               Wards.time_placed, Wards.radiant_networth, Wards.dire_networth, Matches.average_rank,
+               Matches.game_version).join(Matches).where(
+            sa.and_(Wards.is_obs)).order_by(Wards.id.desc()).limit(100000)).all()
+    df = pd.DataFrame(data)
+    hdbscan = HDBSCAN(
+        min_samples=100,
+        cluster_selection_epsilon=32,
+        max_cluster_size=100000,
+        cluster_selection_method='leaf',
+        n_jobs=-1,
+    )
+    hdbscan.fit(df[['x_pos', 'y_pos']])
+    labels = hdbscan.labels_
+    unique = np.unique(hdbscan.labels_[hdbscan.labels_ != -1])
+
+    redis_store.delete('raw_clusters')
+    for label in unique:
+        label_arg = np.argwhere(labels == label).ravel()
+        cluster = df.iloc[label_arg]
+        redis_store.rpush('raw_clusters', cluster.to_json(orient='records'))
+
+    response = Response(
+        json.dumps([row._asdict() for row in data])
+    )
+    response.headers['Content-type'] = 'Application/json'
+    return response
 
 
 @bp.route('/get_task')
 def send_task():
-    response = Response(redis_store.lindex('replays', 0))
+    response = Response(redis_store.lindex('replays', 0) or json.dumps([]))
     response.headers['Content-type'] = 'Application/json'
     return response
 
@@ -69,6 +99,9 @@ def receive_ward_data(match_id):
         db.session.execute(insert(Wards).values(wards))
         db.session.commit()
         redis_store.lpop('replays')
+        print(len(redis_store.lrange('replays', 0, -1)))
     except:
+        import traceback
+        traceback.print_exc()
         redis_store.rpush('replays', redis_store.lpop('replays'))
     return Response()
