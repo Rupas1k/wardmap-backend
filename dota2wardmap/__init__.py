@@ -30,6 +30,7 @@ def create_app():
     with app.app_context():
         db.create_all()
         scheduler.start()
-        # parser.parse()
+        if int(os.environ['INITIAL_PARSING']):
+            parser.parse()
 
     return app

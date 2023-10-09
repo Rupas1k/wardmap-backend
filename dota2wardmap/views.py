@@ -1,3 +1,4 @@
+import os
 import json
 
 import numpy as np
@@ -80,12 +81,12 @@ def clusters():
             sa.and_(Wards.is_obs)).order_by(Wards.id.desc()).limit(100000)).all()
     df = pd.DataFrame(data)
     hdbscan = HDBSCAN(
-        cluster_selection_epsilon=32,
-        min_samples=50,
-        min_cluster_size=30,
-        max_cluster_size=100000,
-        cluster_selection_method='leaf',
-        n_jobs=-1,
+        cluster_selection_epsilon=int(os.environ['CLUSTER_SELECTION_EPSILON']),
+        min_samples=int(os.environ['MIN_SAMPLES']),
+        min_cluster_size=int(os.environ['MIN_CLUSTER_SIZE']),
+        max_cluster_size=int(os.environ['MAX_CLUSTER_SIZE']),
+        cluster_selection_method=os.environ['CLUSTER_SELECTION_METHOD'],
+        n_jobs=int(os.environ['N_JOBS']),
     )
     hdbscan.fit(df[['x_pos', 'y_pos']])
     labels = hdbscan.labels_
