@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import insert
 from models import Wards, Matches
 from definitions import db, redis_store
 
+
 bp = Blueprint('views', __name__)
 
 pd.set_option('display.max_columns', None)
@@ -33,13 +34,40 @@ def plots():
     return response
 
 
-@bp.route('/process_clusters')
-def process_clusters():
-    raw_clusters = [json.loads(raw_cluster) for raw_cluster in redis_store.lrange('raw_clusters', 0, -1)]
-    data = []
-    for cluster_id, cluster_data in enumerate(raw_clusters):
-        for record in cluster_data:
-            data.append({'cluster_id': cluster_id, **record})
+@bp.route('/clusters')
+def clusters():
+    query = select(
+        Wards.duration, Wards.x_pos, Wards.y_pos, Wards.z_pos, Wards.is_radiant, Wards.is_destroyed,
+        Wards.time_placed, Wards.radiant_networth, Wards.dire_networth, Matches.average_rank,
+        Matches.game_version
+    ).join(Matches).where(sa.and_(Wards.is_obs)).order_by(Wards.id.desc()).limit(int(os.environ['AMOUNT']))
+
+    data = db.session.execute(query).all()
+    df = pd.DataFrame(data)
+
+    hdbscan = HDBSCAN(
+        cluster_selection_epsilon=int(os.environ['CLUSTER_SELECTION_EPSILON']),
+        min_samples=int(os.environ['MIN_SAMPLES']),
+        min_cluster_size=int(os.environ['MIN_CLUSTER_SIZE']),
+        max_cluster_size=int(os.environ['MAX_CLUSTER_SIZE']),
+        cluster_selection_method=os.environ['CLUSTER_SELECTION_METHOD'],
+        n_jobs=int(os.environ['N_JOBS']),
+    )
+
+    hdbscan.fit(df[['x_pos', 'y_pos']])
+    unique = np.unique(hdbscan.labels_[hdbscan.labels_ != -1])
+
+    raw_clusters = [
+        df.iloc[np.argwhere(hdbscan.labels_ == label).ravel()].to_dict(orient='records')
+        for label in unique
+    ]
+
+    data = [
+        {'cluster_id': cluster_id, **record}
+        for cluster_id, cluster_data in enumerate(raw_clusters)
+        for record in cluster_data
+    ]
+
     df = pd.DataFrame(data)
 
     agg_functions = {
@@ -52,7 +80,6 @@ def process_clusters():
         'is_radiant': lambda x: "{:.2%}".format(x.mean())
     }
 
-    # df['average_rank'] = df['average_rank'].replace([np.nan, np.inf, -np.inf], -1).astype(int)
 
     group_sizes = df.groupby('cluster_id').size().reset_index(name='amount')
     result_df = (
@@ -68,39 +95,6 @@ def process_clusters():
         redis_store.rpush('clusters', json.dumps(cluster))
 
     response = Response()
-    response.headers['Content-type'] = 'Application/json'
-    return response
-
-
-@bp.route('/clusters')
-def clusters():
-    data = db.session.execute(
-        select(Wards.duration, Wards.x_pos, Wards.y_pos, Wards.z_pos, Wards.is_radiant, Wards.is_destroyed,
-               Wards.time_placed, Wards.radiant_networth, Wards.dire_networth, Matches.average_rank,
-               Matches.game_version).join(Matches).where(
-            sa.and_(Wards.is_obs)).order_by(Wards.id.desc()).limit(100000)).all()
-    df = pd.DataFrame(data)
-    hdbscan = HDBSCAN(
-        cluster_selection_epsilon=int(os.environ['CLUSTER_SELECTION_EPSILON']),
-        min_samples=int(os.environ['MIN_SAMPLES']),
-        min_cluster_size=int(os.environ['MIN_CLUSTER_SIZE']),
-        max_cluster_size=int(os.environ['MAX_CLUSTER_SIZE']),
-        cluster_selection_method=os.environ['CLUSTER_SELECTION_METHOD'],
-        n_jobs=int(os.environ['N_JOBS']),
-    )
-    hdbscan.fit(df[['x_pos', 'y_pos']])
-    labels = hdbscan.labels_
-    unique = np.unique(hdbscan.labels_[hdbscan.labels_ != -1])
-
-    redis_store.delete('raw_clusters')
-    for label in unique:
-        label_arg = np.argwhere(labels == label).ravel()
-        cluster = df.iloc[label_arg]
-        redis_store.rpush('raw_clusters', cluster.to_json(orient='records'))
-
-    response = Response(
-        json.dumps([row._asdict() for row in data])
-    )
     response.headers['Content-type'] = 'Application/json'
     return response
 
