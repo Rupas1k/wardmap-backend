@@ -1,11 +1,11 @@
 import json
+
 from sqlalchemy import select
 from flask import Blueprint
 
 import api
-from models import db, Matches
-
-from definitions import scheduler, redis_store
+from models import Matches
+from definitions import db, scheduler, redis_store
 
 
 bp = Blueprint('parser', __name__)
