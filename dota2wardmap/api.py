@@ -21,11 +21,12 @@ def fetch_live_games(step=100, mmr_threshold=8000):
     matches = execute_graphql('GetPublicMatches', {'take': step, 'skip': 0})['live']['matches']
     i = 0
     to_add = 1
-    while matches[-1]['averageRank'] > mmr_threshold and to_add:
-        to_add = execute_graphql('GetPublicMatches', {'take': step, 'skip': step * i})['live']['matches']
-        matches += to_add
-        i += 1
-    matches = [match for match in matches if match['averageRank'] > mmr_threshold]
+    if matches:
+        while matches[-1]['averageRank'] > mmr_threshold and to_add:
+            to_add = execute_graphql('GetPublicMatches', {'take': step, 'skip': step * i})['live']['matches']
+            matches += to_add
+            i += 1
+        matches = [match for match in matches if match['averageRank'] > mmr_threshold]
     league_matches = execute_graphql('GetLeagueMatches', {'take': step, 'skip': 0})['live']['matches']
     matches += league_matches
     return matches
