@@ -41,7 +41,25 @@ def clusters():
         Wards.duration, Wards.x_pos, Wards.y_pos, Wards.z_pos, Wards.is_radiant, Wards.is_destroyed,
         Wards.time_placed, Wards.radiant_networth, Wards.dire_networth, Matches.average_rank,
         Matches.game_version
-    ).join(Matches).where(sa.and_(Wards.is_obs)).order_by(Wards.id.desc()).limit(int(os.environ['AMOUNT']))
+    ).join(Matches).where(sa.and_(Wards.is_obs, Wards.is_post_game == False)).order_by(Wards.id.desc()).limit(int(os.environ['AMOUNT']))
+
+    # subquery = (
+    #     select(Matches.id)
+    #     .order_by(Matches.id.desc())
+    #     .limit(7000)
+    # )
+    #
+    # query = (
+    #     select(
+    #         Wards.duration, Wards.x_pos, Wards.y_pos, Wards.z_pos, Wards.is_radiant, Wards.is_destroyed,
+    #         Wards.time_placed, Wards.radiant_networth, Wards.dire_networth, Matches.average_rank,
+    #         Matches.game_version
+    #     )
+    #     .join(Matches)
+    #     .where(sa.and_(Wards.is_obs))
+    #     .where(Matches.id.in_(select(subquery)))
+    #     .order_by(Wards.id.desc())
+    # )
 
     data = db.session.execute(query).all()
     df = pd.DataFrame(data)
@@ -78,7 +96,10 @@ def clusters():
         'average_rank': 'mean',
         'duration': 'mean',
         'time_placed': 'mean',
-        'is_radiant': lambda x: "{:.2%}".format(x.mean())
+        'radiant_networth': 'mean',
+        'dire_networth': 'mean',
+        'is_radiant': 'sum',
+        'is_destroyed': 'sum'
     }
 
 
@@ -100,12 +121,37 @@ def clusters():
     return response
 
 
-@bp.route('/get_task')
-def send_task():
-    response = Response(redis_store.lindex('replays', 0) or json.dumps([]))
+@bp.route('/get_wards')
+def send_wards():
+    data = json.dumps([row._asdict() for row in db.session.execute(
+        select(Wards.id, Wards.x_pos, Wards.y_pos, Wards.z_pos, Wards.duration, Wards.time_placed).where(
+            Wards.is_obs == True).order_by(Wards.id.desc()).limit(50000)).all()])
+    response = Response(data)
     response.headers['Content-type'] = 'Application/json'
     return response
 
+@bp.route('/get_clusters')
+def send_clusters():
+    data = redis_store.lrange('clusters', 0, -1)
+    response = Response(data)
+    response.headers['Content-type'] = 'Application/json'
+    return response
+
+@bp.route('/get_task')
+def send_task():
+    response = Response(redis_store.lindex('replays', 0) or '')
+    response.headers['Content-type'] = 'Application/json'
+    return response
+
+@bp.route('/queue_league/<league_id>')
+def queue_league(league_id):
+    db_ids = set(db.session.execute(select(Matches.id, Matches.league_id).filter(Matches.league_id == int(league_id))).scalars().all())
+    redis_ids = set(int(replay) for replay in redis_store.lrange('replays', 0, -1))
+    matches = {match['id'] for match in api.fetch_league_games(int(league_id))}
+    for match_id in matches - db_ids - redis_ids:
+        redis_store.rpush('replays', match_id)
+    response = Response()
+    return response
 
 @bp.route('/send_ward_data/<match_id>', methods=['POST'])
 def receive_ward_data(match_id):

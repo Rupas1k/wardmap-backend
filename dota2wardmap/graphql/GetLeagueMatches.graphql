@@ -1,0 +1,9 @@
+query GetLeagueMatches($take: Int!, $skip: Int!)
+{
+    live{
+        matches(request: {take: $take, skip: $skip, isCompleted: true, tiers: [AMATEUR,DPC_LEAGUE, DPC_LEAGUE_FINALS,DPC_LEAGUE_QUALIFIER,DPC_QUALIFIER,INTERNATIONAL,MAJOR,MINOR,PROFESSIONAL]}){
+            matchId
+            leagueId
+        }
+    }
+}
