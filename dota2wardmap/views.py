@@ -11,7 +11,8 @@ from sqlalchemy import select
 from flask import Blueprint, Response, request
 from sqlalchemy.dialects.postgresql import insert
 
-from models import Wards, Matches
+import api
+from models import Wards, Matches, Leagues
 from definitions import db, redis_store
 
 
@@ -108,9 +109,12 @@ def send_task():
 
 @bp.route('/send_ward_data/<match_id>', methods=['POST'])
 def receive_ward_data(match_id):
+    if 'skip' in request.get_json(force=True):
+        redis_store.rpush('replays', redis_store.lpop('replays'))
+        return Response()
+
     try:
-        match_id = int(json.loads(redis_store.lrange('replays', 0, 0)[0])['matchId'])
-        average_rank = int(json.loads(redis_store.lrange('replays', 0, 0)[0])['averageRank'])
+        match_id = redis_store.lindex('replays', 0)
         data = request.get_json(force=True)
         match_data = data.pop(0)
         wards = []
@@ -140,20 +144,25 @@ def receive_ward_data(match_id):
                 'dire_networth': ward_data['direNetworth'],
             }
             wards.append(ward)
-        db.session.execute(insert(Matches).values(id=match_id,
-                                                  average_rank=average_rank,
-                                                  league_id=match_data['league'],
-                                                  tournament_id=match_data['tournament'],
-                                                  game_version=match_data['version'],
-                                                  date=match_data['date'],
-                                                  region=match_data['region'],
-                                                  duration=match_data['duration']))
-        db.session.execute(insert(Wards).values(wards))
+        if match_data['league'] is not None:
+            if not db.session.query(Leagues).filter(Leagues.id == int(match_data['league'])).first():
+                db.session.execute(insert(Leagues).values(id=int(match_data['league'])))
+
+        if not db.session.query(Matches).filter(Matches.id == match_id).first():
+            db.session.execute(insert(Matches).values(id=match_id,
+                                                      league_id=match_data['league'],
+                                                      game_version=match_data['version'],
+                                                      date=match_data['date'],
+                                                      region=match_data['region'],
+                                                      duration=match_data['duration']))
+            db.session.execute(insert(Wards).values(wards))
+        else:
+            print(f'{match_id} is already parsed')
         db.session.commit()
         redis_store.lpop('replays')
-        # print(len(redis_store.lrange('replays', 0, -1)))
     except:
         import traceback
         traceback.print_exc()
         redis_store.rpush('replays', redis_store.lpop('replays'))
+        print(request.get_json(force=True))
     return Response()

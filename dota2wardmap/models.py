@@ -8,29 +8,19 @@ class Leagues(db.Model):
     id = mapped_column(Integer, primary_key=True, nullable=False)
     name = mapped_column(String)
 
-    # matches = relationship('Matches', back_populates='league')
-
-
-class Tournaments(db.Model):
-    id = mapped_column(Integer, primary_key=True, nullable=False)
-
-    # matches = relationship('Matches', back_populates='tournament')
+    matches = relationship('Matches', back_populates='league')
 
 
 class Matches(db.Model):
     id = mapped_column(BigInteger, primary_key=True, nullable=False)
-    # league_id = mapped_column(Integer, ForeignKey('leagues.id'))
-    # tournament_id = mapped_column(Integer, ForeignKey('tournaments.id'))
-    league_id = mapped_column(Integer)
-    tournament_id = mapped_column(Integer)
+    league_id = mapped_column(Integer, ForeignKey('leagues.id'))
     duration = mapped_column(SmallInteger)
     average_rank = mapped_column(SmallInteger)
     region = mapped_column(SmallInteger)
     date = mapped_column(BigInteger)
     game_version = mapped_column(SmallInteger)
 
-    # league = relationship('Leagues', back_populates='matches')
-    # tournament = relationship('Tournaments', back_populates='matches')
+    league = relationship('Leagues', back_populates='matches')
     wards = relationship('Wards', back_populates='match')
 
 
