@@ -15,7 +15,6 @@ class Matches(db.Model):
     id = mapped_column(BigInteger, primary_key=True, nullable=False)
     league_id = mapped_column(Integer, ForeignKey('leagues.id'))
     duration = mapped_column(SmallInteger)
-    average_rank = mapped_column(SmallInteger)
     region = mapped_column(SmallInteger)
     date = mapped_column(BigInteger)
     game_version = mapped_column(SmallInteger)

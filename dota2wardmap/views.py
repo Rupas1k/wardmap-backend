@@ -39,7 +39,7 @@ def plots():
 def clusters():
     query = select(
         Wards.duration, Wards.x_pos, Wards.y_pos, Wards.z_pos, Wards.is_radiant, Wards.is_destroyed,
-        Wards.time_placed, Wards.radiant_networth, Wards.dire_networth, Matches.average_rank,
+        Wards.time_placed, Wards.radiant_networth, Wards.dire_networth,
         Matches.game_version
     ).join(Matches).where(sa.and_(Wards.is_obs, Wards.is_post_game == False)).order_by(Wards.id.desc()).limit(int(os.environ['AMOUNT']))
 
@@ -52,7 +52,7 @@ def clusters():
     # query = (
     #     select(
     #         Wards.duration, Wards.x_pos, Wards.y_pos, Wards.z_pos, Wards.is_radiant, Wards.is_destroyed,
-    #         Wards.time_placed, Wards.radiant_networth, Wards.dire_networth, Matches.average_rank,
+    #         Wards.time_placed, Wards.radiant_networth, Wards.dire_networth,
     #         Matches.game_version
     #     )
     #     .join(Matches)
@@ -93,7 +93,6 @@ def clusters():
         'x_pos': 'mean',
         'y_pos': 'mean',
         'z_pos': lambda x: x.mode().iloc[0], #- 16384,
-        'average_rank': 'mean',
         'duration': 'mean',
         'time_placed': 'mean',
         'radiant_networth': 'mean',
