@@ -3,7 +3,7 @@ import json
 from flask_sock import Server, Blueprint
 from sqlalchemy import select
 
-from models import Wards
+from models import Wards, Matches
 from definitions import db, socket, redis_store
 
 
@@ -17,7 +17,7 @@ def echo(ws: Server):
         if fetched['type'] == 'wards':
             data = json.dumps([row._asdict() for row in db.session.execute(
             select(Wards.id, Wards.x_pos, Wards.y_pos, Wards.z_pos, Wards.duration, Wards.time_placed).where(
-                Wards.is_obs == True).order_by(Wards.id.desc()).limit(50000)).all()])
+                Wards.is_obs == True).join(Matches).where(Matches.league_id == 15728).order_by(Wards.id.desc()).limit(50000)).all()])
             ws.send(json.dumps({
                 'type': fetched['type'],
                 'data': data
