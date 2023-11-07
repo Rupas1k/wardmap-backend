@@ -252,12 +252,18 @@ def receive_ward_data(match_id):
         for ward_data in data:
             if ward_data['event'] == 'expired' or 'guys' in ward_data['npc_killed']:
                 ward_data['playerDestroyedSteamId'] = None
+
             if 'playerPlacedSteamId' not in ward_data:
                 ward_data['playerPlacedSteamId'] = None
+            else:
+                ward_data['playerPlacedSteamId'] = ward_data['playerPlacedSteamId'] - 76561197960265728
+
             if 'playerDestroyedSteamId' not in ward_data:
-                ward_data['playerDestroyedSteamId'] = None
+                ward_data['playerDestroyedSteamId'] = ward_data['playerDestroyedSteamId'] - 76561197960265728
+
             if 'isRadiant' not in ward_data:
                 ward_data['isRadiant'] = None
+
             ward = {
                 'match_id': match_id,
                 'is_obs': ward_data['isObs'],

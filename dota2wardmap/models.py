@@ -30,8 +30,8 @@ class Wards(db.Model):
     is_radiant = mapped_column(Boolean, nullable=True)
     is_destroyed = mapped_column(Boolean, nullable=False)
     is_post_game = mapped_column(Boolean, nullable=False)
-    player_placed_id = mapped_column(BigInteger, nullable=True)
-    player_destroyed_id = mapped_column(BigInteger)
+    player_placed_id = mapped_column(Integer, nullable=True)
+    player_destroyed_id = mapped_column(Integer)
     time_placed = mapped_column(SmallInteger, nullable=False)
     duration = mapped_column(SmallInteger, nullable=False)
 
