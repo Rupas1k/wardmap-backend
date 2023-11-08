@@ -33,8 +33,7 @@ def plots():
 
 @bp.route('/clusters')
 def clusters():
-    perform_clustering()
-    # new_perform_clustering()
+    perform_clustering(**request.args)
 
     response = Response()
     response.headers['Content-type'] = 'Application/json'
