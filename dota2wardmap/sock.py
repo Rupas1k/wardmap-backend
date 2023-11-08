@@ -34,4 +34,10 @@ def echo(ws: Server):
                 'type': fetched['type'],
                 'data': data
             }))
+        elif fetched['type'] == 'metadata':
+            data = redis_store.get('metadata')
+            ws.send(json.dumps({
+                'type': fetched['type'],
+                'data': data
+            }))
         db.session.close()
