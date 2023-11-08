@@ -19,11 +19,9 @@ def create_app():
     redis_store.init_app(app)
     scheduler.init_app(app)
 
-    import sock
     import views
     import parser
     app.register_blueprint(views.bp)
-    app.register_blueprint(sock.bp)
     app.register_blueprint(parser.bp)
 
     with app.app_context():
