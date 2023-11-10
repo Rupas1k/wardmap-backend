@@ -30,8 +30,8 @@ class Wards(db.Model):
     is_radiant = mapped_column(Boolean, nullable=True)
     is_destroyed = mapped_column(Boolean, nullable=False)
     is_post_game = mapped_column(Boolean, nullable=False)
-    player_placed_id = mapped_column(Integer, nullable=True)
-    player_destroyed_id = mapped_column(Integer)
+    player_placed_id = mapped_column(Integer, ForeignKey('players.id'))
+    player_destroyed_id = mapped_column(Integer, ForeignKey('players.id'))
     time_placed = mapped_column(SmallInteger, nullable=False)
     duration = mapped_column(SmallInteger, nullable=False)
 
@@ -43,7 +43,14 @@ class Wards(db.Model):
     dire_networth = mapped_column(Integer, nullable=False)
 
     match = relationship('Matches', back_populates='wards')
+    player_placed = relationship('Players', foreign_keys=[player_placed_id], back_populates='wards_placed')
+    player_destroyed = relationship('Players', foreign_keys=[player_destroyed_id], back_populates='wards_destroyed')
+class Players(db.Model):
+    id = mapped_column(Integer, primary_key=True)
+    name = mapped_column(String, nullable=False)
 
+    wards_placed = relationship('Wards', foreign_keys=[Wards.player_placed_id], back_populates='player_placed')
+    wards_destroyed = relationship('Wards', foreign_keys=[Wards.player_destroyed_id], back_populates='player_destroyed')
 
 if __name__ == '__main__':
     pass
