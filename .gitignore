@@ -1,3 +1,4 @@
 .env
 .idea
+dota2wardmap/.ipynb_checkpoints
 dota2wardmap/graphql/graphql.config.yml
