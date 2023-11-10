@@ -29,6 +29,7 @@ def fetch_live_games(step=100, mmr_threshold=8000):
     matches += league_matches
     return matches
 
+
 def fetch_league_games(league_id, step=100):
     matches = execute_graphql('GetAllLeagueMatches', {'league_id': league_id, 'take': step, 'skip': 0})['league']['matches']
     i = 0
@@ -37,10 +38,28 @@ def fetch_league_games(league_id, step=100):
         i += 1
     return matches
 
+
+def fetch_league_players(league_id):
+    players = execute_graphql('GetLeaguePlayers', {'league': league_id})['league']['tables']['tablePlayers']
+    players_return = []
+    for player in players:
+        account = player['steamAccount']['proSteamAccount']
+        players_return.append({
+            'id': account['id'],
+            'name': account['name'],
+            'team': {
+                'id': account['team']['id'],
+                'name': account['team']['name']
+            }
+        })
+    return players_return
+
+
 def execute_graphql(query_name, params):
     with open(ROOT_DIR / Path(f'graphql/{query_name}.graphql'), encoding='utf8') as query:
         return client.execute(gql(query.read()), variable_values=params)
 
 
 if __name__ == '__main__':
-    print(len(fetch_live_games(150)))
+    import json
+    print(json.dumps(fetch_league_players(15728), indent=4))

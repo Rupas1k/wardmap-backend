@@ -1,4 +1,3 @@
-import os
 import json
 
 import numpy as np
@@ -9,7 +8,7 @@ import sqlalchemy as sa
 from sqlalchemy import select
 
 from definitions import db, redis_store
-from models import Wards, Matches
+from models import Wards, Matches, Players
 
 
 def perform_clustering(
@@ -20,8 +19,8 @@ def perform_clustering(
         n_jobs=-1,
 ):
     df = pd.DataFrame(pd.read_sql(
-        sql=select(Wards, Matches).join(Matches).where(sa.and_(Wards.is_obs, Matches.league_id == 15728)).order_by(
-            Matches.id.desc()),
+        sql=select(Wards, Matches, Players).join(Players, Wards.player_placed).join(Matches).where(
+            sa.and_(Wards.is_obs, Matches.league_id == 15728)).order_by(Matches.id.desc()),
         con=db.engine
     ))
 
@@ -41,7 +40,7 @@ def perform_clustering(
     grouped = df.groupby(['cluster_id', 'is_radiant']).agg({
         'x_pos': lambda x: round(x.mean()),
         'y_pos': lambda x: round(x.mean()),
-        'z_pos': lambda x: x.mode().iloc[0],  # - 16384,
+        'z_pos': lambda x: x.mode().iloc[0],
         'duration': lambda x: round(x.mean()),
         'time_placed': lambda x: round(x.mean()),
         'advantage': lambda x: round(x.mean()),
@@ -58,6 +57,10 @@ def perform_clustering(
         bins = [*range(-interval, 13 * interval, interval), 99999]
         cuts = pd.cut(wards['time_placed'], bins=bins).value_counts().sort_index().tolist()
 
+        players_dict = wards[['player_placed_id', 'name']].groupby(['player_placed_id', 'name']).size().to_frame('amount').sort_values(by='amount', ascending=False).head(5).reset_index().to_dict(orient='records')
+        radiant_players_dict = wards[['player_placed_id', 'name']][wards['is_radiant'] == True].groupby(['player_placed_id', 'name']).size().to_frame('amount').sort_values(by='amount', ascending=False).head(5).reset_index().to_dict(orient='records')
+        dire_players_dict = wards[['player_placed_id', 'name']][wards['is_radiant'] == False].groupby(['player_placed_id', 'name']).size().to_frame('amount').sort_values(by='amount', ascending=False).head(5).reset_index().to_dict(orient='records')
+
         cluster = {
             'cluster_id': i,
             'x_pos': round(current['x_pos'].mean()),
@@ -68,25 +71,28 @@ def perform_clustering(
                 'destroyed': current.loc[True]['is_destroyed'],
                 'advantage': current.loc[True]['advantage'],
                 'duration': current.loc[True]['duration'],
-                'time_placed': current.loc[True]['time_placed']
+                'time_placed': current.loc[True]['time_placed'],
+                'players': radiant_players_dict
             } if True in current.index else None,
             'dire': {
                 'amount': current.loc[False]['amount'],
                 'destroyed': current.loc[False]['is_destroyed'],
                 'advantage': current.loc[False]['advantage'],
                 'duration': current.loc[False]['duration'],
-                'time_placed': current.loc[False]['time_placed']
+                'time_placed': current.loc[False]['time_placed'],
+                'players': dire_players_dict
             } if False in current.index else None,
             'all': {
                 'amount': current['amount'].sum(),
                 'destroyed': current['is_destroyed'].sum(),
                 'advantage': None,
                 'duration': round(current['duration'].mean()),
-                'time_placed': round(current['time_placed'].mean())
+                'time_placed': round(current['time_placed'].mean()),
+                'players': players_dict
             },
             'graphs': {
                 'wards': cuts
-            }
+            },
         }
         redis_store.rpush('clusters', json.dumps(cluster, allow_nan=False, default=int))
 
@@ -109,18 +115,3 @@ def perform_clustering(
         }
     }
     redis_store.rpush('clusters', json.dumps(average, allow_nan=False, default=int))
-
-#     metadata = {
-#         'clustering': {
-#             'algorithm': 'HDBSCAN',
-#             'cluster_selection_method': 'eom',
-#             'cluster_selection_epsilon': 64,
-#             'min_cluster_size': 5,
-#         },
-#         'league_id': 15728,
-#         'ward_type': 'obs',
-#         'matches_amount': matches_amount,
-#         'total_entries': initial_data_length,
-#         'entries_in_dataset': int(result_df['amount'].sum())
-#     }
-#     redis_store.set('metadata', json.dumps(metadata))

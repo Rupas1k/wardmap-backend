@@ -1,0 +1,21 @@
+query GetLeaguePlayers($league: Int!)
+{
+    league(id: $league) {
+        id
+        tables{
+            tablePlayers{
+                steamAccount{
+                    proSteamAccount{
+                        id
+                        name
+                        team{
+                            id
+                            tag
+                            name
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

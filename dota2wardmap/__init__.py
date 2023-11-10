@@ -12,10 +12,9 @@ def create_app():
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ['DB_URL']
     app.config['REDIS_URL'] = os.environ['REDIS_URL']
 
-    from definitions import db, migrate, socket, redis_store, scheduler
+    from definitions import db, migrate, redis_store, scheduler
     db.init_app(app)
     migrate.init_app(app, db)
-    socket.init_app(app)
     redis_store.init_app(app)
     scheduler.init_app(app)
 

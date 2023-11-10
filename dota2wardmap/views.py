@@ -8,7 +8,7 @@ from flask import Blueprint, Response, request
 from sqlalchemy.dialects.postgresql import insert
 
 import api
-from models import Wards, Matches, Leagues
+from models import Wards, Matches, Leagues, Players
 from definitions import db, redis_store
 from main import perform_clustering
 
@@ -77,6 +77,18 @@ def queue_league(league_id):
         redis_store.rpush('replays', match_id)
     response = Response()
     return response
+
+@bp.route('/parse_league_players/<league_id>')
+def parse_league_players(league_id):
+    db_ids = set(db.session.execute(select(Players.id)).scalars().all())
+    players = api.fetch_league_players(int(league_id))
+    for player in players:
+        if player['id'] not in db_ids:
+            db.session.execute(insert(Players).values({
+                'id': player['id'],
+                'name': player['name']
+            }))
+    db.session.commit()
 
 @bp.route('/send_ward_data/<match_id>', methods=['POST'])
 def receive_ward_data(match_id):
