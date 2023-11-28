@@ -1,47 +1,86 @@
 import json
 
-import pandas as pd
-import matplotlib.pyplot as plt
-
 from sqlalchemy import select
-from flask import Blueprint, Response, request
+from flask import Blueprint, Response, request, render_template
 from sqlalchemy.dialects.postgresql import insert
 
 import api
-from models import Wards, Matches, Leagues, Players
-from definitions import db, redis_store
+from models import Wards, Matches, Leagues, Players, Maps
+from extensions import db, redis_store
 from main import perform_clustering
 
 bp = Blueprint('views', __name__)
 
-pd.set_option('display.max_columns', None)
+@bp.route('/')
+def main():
+    return render_template('index.html')
 
 
-@bp.route('/plots')
-def plots():
-    data = redis_store.lrange('raw_clusters', 0, -1)
-    for cluster in data:
-        df = pd.DataFrame(json.loads(cluster))
-        plt.scatter(x=df['x_pos'].mean(), y=df['y_pos'].mean(), s=1)
-        # print(df)
-    plt.show()
+@bp.route('/league/<int:league_id>')
+def league(league_id):
+    return render_template('index.html')
 
-    response = Response()
-    response.headers['Content-type'] = 'Application/json'
-    return response
 
 
 @bp.route('/clusters')
 def clusters():
-    perform_clustering(**request.args)
+    clustered = perform_clustering(**request.args)
+
+    default_values = {
+        'cluster_selection_epsilon': 64,
+        'min_samples': 10,
+        'min_cluster_size': 10,
+        'cluster_selection_method': 'eom',
+        'league_id': 15909,
+        'public': False
+    }
+
+    values = {**default_values, **request.args}
+
+    # league_map = db.session.execute(select(Maps, Leagues).join(Leagues).filter(Leagues.id == int(values['league_id']))).all()
+
+    db.session.execute(insert(Maps).values(
+        league_id=values['league_id'],
+        cluster_selection_epsilon=values['cluster_selection_epsilon'],
+        min_samples=values['min_samples'],
+        min_cluster_size=values['min_cluster_size'],
+        cluster_selection_method=values['cluster_selection_method'],
+        version=int(redis_store.get('version'))
+    ).on_conflict_do_update(
+        constraint='maps_pkey',
+        set_=dict(
+            cluster_selection_epsilon=values['cluster_selection_epsilon'],
+            min_samples=values['min_samples'],
+            min_cluster_size=values['min_cluster_size'],
+            cluster_selection_method=values['cluster_selection_method'],
+            version=int(redis_store.get('version'))
+        )
+    ))
+
+    redis_store.delete(values['league_id'])
+    for cluster in clustered:
+        redis_store.rpush(values['league_id'], json.dumps(cluster, allow_nan=False, default=int))
+
+    db.session.commit()
 
     response = Response()
     response.headers['Content-type'] = 'Application/json'
     return response
 
 
+@bp.route('/set_version/<int:version>')
+def set_version(version):
+    redis_store.set('version', version)
+    return Response(version)
+
+
+@bp.route('/get_version')
+def get_version():
+    return Response(redis_store.get('version'))
+
+
 @bp.route('/get_wards')
-def send_wards():
+def get_wards():
     data = json.dumps([row._asdict() for row in db.session.execute(
         select(Wards.id, Wards.x_pos, Wards.y_pos, Wards.z_pos, Wards.duration, Wards.time_placed).where(
             Wards.is_obs == True).order_by(Wards.id.desc()).limit(50000)).all()])
@@ -49,9 +88,10 @@ def send_wards():
     response.headers['Content-type'] = 'Application/json'
     return response
 
-@bp.route('/get_clusters')
-def send_clusters():
-    data = redis_store.lrange('clusters', 0, -1)
+
+@bp.route('/get_clusters/<int:league_id>')
+def get_clusters(league_id):
+    data = redis_store.lrange(league_id, 0, -1)
     metadata = redis_store.get('metadata')
     response = Response(json.dumps({
         # 'metadata': metadata,
@@ -61,16 +101,18 @@ def send_clusters():
     response.headers['Access-Control-Allow-Origin'] = '*'
     return response
 
+
 @bp.route('/get_task')
-def send_task():
-    # response = Response(redis_store.lindex('replays', 0) or '')
+def get_task():
     response = Response(redis_store.lpop('replays') or '')
     response.headers['Content-type'] = 'Application/json'
     return response
 
+
 @bp.route('/queue_league/<league_id>')
 def queue_league(league_id):
-    db_ids = set(db.session.execute(select(Matches.id, Matches.league_id).filter(Matches.league_id == int(league_id))).scalars().all())
+    db_ids = set(db.session.execute(
+        select(Matches.id, Matches.league_id).filter(Matches.league_id == int(league_id))).scalars().all())
     redis_ids = set(int(replay) for replay in redis_store.lrange('replays', 0, -1))
     matches = {match['id'] for match in api.fetch_league_games(int(league_id))}
     for match_id in matches - db_ids - redis_ids:
@@ -78,25 +120,30 @@ def queue_league(league_id):
     response = Response()
     return response
 
-@bp.route('/parse_league_players/<league_id>')
+
+@bp.route('/parse_league_players/<int:league_id>')
 def parse_league_players(league_id):
     db_ids = set(db.session.execute(select(Players.id)).scalars().all())
     players = api.fetch_league_players(int(league_id))
+    league = db.session.query(Leagues).filter(Leagues.id == league_id).first()
     for player in players:
         if player['id'] not in db_ids:
-            db.session.execute(insert(Players).values({
-                'id': player['id'],
-                'name': player['name']
-            }))
+            new_player = Players(id=player['id'], name=player.get('name'))
+            new_player.leagues.append(league)
+            db.session.add(new_player)
+        else:
+            old_player = db.session.query(Players).filter(Players.id == int(player['id'])).first()
+            old_player.leagues.append(league)
+            db.session.add(old_player)
     db.session.commit()
 
-@bp.route('/send_ward_data/<match_id>', methods=['POST'])
-def receive_ward_data(match_id):
+
+@bp.route('/send_ward_data/<int:match_id>', methods=['POST'])
+def get_ward_data(match_id):
     if 'skip' in request.get_json(force=True):
         return Response()
 
     try:
-        match_id = int(match_id)
         data = request.get_json(force=True)
         match_data = data.pop(0)
         wards = []
@@ -105,15 +152,26 @@ def receive_ward_data(match_id):
                 ward_data['playerDestroyedSteamId'] = None
 
             if 'playerPlacedSteamId' not in ward_data:
+                # TODO: LOG
                 ward_data['playerPlacedSteamId'] = None
             else:
                 ward_data['playerPlacedSteamId'] = ward_data['playerPlacedSteamId'] - 76561197960265728
 
             if 'playerDestroyedSteamId' not in ward_data:
+                # TODO: LOG
+                ward_data['playerDestroyedSteamId'] = None
+            elif ward_data['playerDestroyedSteamId'] is not None:
                 ward_data['playerDestroyedSteamId'] = ward_data['playerDestroyedSteamId'] - 76561197960265728
 
             if 'isRadiant' not in ward_data:
+                # TODO: LOG
                 ward_data['isRadiant'] = None
+
+            if 'radiantNetworth' not in ward_data:
+                ward_data['radiantNetworth'] = None
+
+            if 'direNetworth' not in ward_data:
+                ward_data['direNetworth'] = None
 
             ward = {
                 'match_id': match_id,
@@ -132,20 +190,28 @@ def receive_ward_data(match_id):
                 'dire_networth': ward_data['direNetworth'],
             }
             wards.append(ward)
+
         if match_data['league'] is not None:
             if not db.session.query(Leagues).filter(Leagues.id == int(match_data['league'])).first():
-                db.session.execute(insert(Leagues).values(id=int(match_data['league'])))
+                league_info = api.fetch_league_info(match_data['league'])
+                db.session.add(Leagues(id=int(match_data['league']), name=league_info['displayName']))
+                parse_league_players(match_data['league'])
 
         if not db.session.query(Matches).filter(Matches.id == match_id).first():
-            db.session.execute(insert(Matches).values(id=match_id,
-                                                      league_id=match_data['league'],
-                                                      game_version=match_data['version'],
-                                                      date=match_data['date'],
-                                                      region=match_data['region'],
-                                                      duration=match_data['duration']))
+            new_match = Matches(
+                id=match_id,
+                league_id=match_data['league'],
+                game_version=match_data['version'],
+                date=match_data['date'],
+                region=match_data['region'],
+                duration=match_data['duration']
+            )
+            db.session.add(new_match)
             db.session.execute(insert(Wards).values(wards))
+            # db.session.add_all([Wards(**ward) for ward in wards])
         else:
             print(f'{match_id} is already parsed')
+
         db.session.commit()
     except:
         import traceback

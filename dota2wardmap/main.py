@@ -1,26 +1,29 @@
-import json
-
-import numpy as np
 import pandas as pd
 from sklearn.cluster import HDBSCAN
 
 import sqlalchemy as sa
 from sqlalchemy import select
 
-from definitions import db, redis_store
+from extensions import db
 from models import Wards, Matches, Players
 
 
+pd.set_option('display.max_columns', None)
+
+
 def perform_clustering(
-        cluster_selection_epsilon=70,
-        min_samples=5,
-        min_cluster_size=5,
+        cluster_selection_epsilon=64,
+        min_samples=10,
+        min_cluster_size=10,
         cluster_selection_method='eom',
+        league_id=15909,
         n_jobs=-1,
 ):
+    clusters = []
+
     df = pd.DataFrame(pd.read_sql(
         sql=select(Wards, Matches, Players).join(Players, Wards.player_placed).join(Matches).where(
-            sa.and_(Wards.is_obs, Matches.league_id == 15728)).order_by(Matches.id.desc()),
+            sa.and_(Wards.is_obs, Matches.league_id == league_id)).order_by(Matches.id.desc()),
         con=db.engine
     ))
 
@@ -48,7 +51,7 @@ def perform_clustering(
     })
     grouped['amount'] = df.groupby(['cluster_id', 'is_radiant']).size()
 
-    redis_store.delete('clusters')
+    # redis_store.delete('clusters')
     for i in range(len(set(hdbscan.labels_)) - 1):
         current = grouped.loc[i]
         wards = df[df['cluster_id'] == i]
@@ -57,9 +60,9 @@ def perform_clustering(
         bins = [*range(-interval, 13 * interval, interval), 99999]
         cuts = pd.cut(wards['time_placed'], bins=bins).value_counts().sort_index().tolist()
 
-        players_dict = wards[['player_placed_id', 'name']].groupby(['player_placed_id', 'name']).size().to_frame('amount').sort_values(by='amount', ascending=False).head(5).reset_index().to_dict(orient='records')
-        radiant_players_dict = wards[['player_placed_id', 'name']][wards['is_radiant'] == True].groupby(['player_placed_id', 'name']).size().to_frame('amount').sort_values(by='amount', ascending=False).head(5).reset_index().to_dict(orient='records')
-        dire_players_dict = wards[['player_placed_id', 'name']][wards['is_radiant'] == False].groupby(['player_placed_id', 'name']).size().to_frame('amount').sort_values(by='amount', ascending=False).head(5).reset_index().to_dict(orient='records')
+        players_dict = wards[['player_placed_id', 'name']].groupby(['player_placed_id', 'name']).size().to_frame('amount').sort_values(by='amount', ascending=False).reset_index().to_dict(orient='records')
+        radiant_players_dict = wards[['player_placed_id', 'name']][wards['is_radiant'] == True].groupby(['player_placed_id', 'name']).size().to_frame('amount').sort_values(by='amount', ascending=False).reset_index().to_dict(orient='records')
+        dire_players_dict = wards[['player_placed_id', 'name']][wards['is_radiant'] == False].groupby(['player_placed_id', 'name']).size().to_frame('amount').sort_values(by='amount', ascending=False).reset_index().to_dict(orient='records')
 
         cluster = {
             'cluster_id': i,
@@ -72,7 +75,13 @@ def perform_clustering(
                 'advantage': current.loc[True]['advantage'],
                 'duration': current.loc[True]['duration'],
                 'time_placed': current.loc[True]['time_placed'],
-                'players': radiant_players_dict
+                'players': radiant_players_dict,
+                'graphs': {
+                    'wards': {
+                        'placed': pd.cut(wards[wards['is_radiant'] == True]['time_placed'], bins=bins).value_counts().sort_index().tolist(),
+                        'destroyed': pd.cut(wards[(wards['is_radiant'] == True) & (wards['is_destroyed'] == True)]['time_placed'], bins=bins).value_counts().sort_index().tolist()
+                    }
+                },
             } if True in current.index else None,
             'dire': {
                 'amount': current.loc[False]['amount'],
@@ -80,7 +89,13 @@ def perform_clustering(
                 'advantage': current.loc[False]['advantage'],
                 'duration': current.loc[False]['duration'],
                 'time_placed': current.loc[False]['time_placed'],
-                'players': dire_players_dict
+                'players': dire_players_dict,
+                'graphs': {
+                    'wards': {
+                        'placed': pd.cut(wards[wards['is_radiant'] == False]['time_placed'], bins=bins).value_counts().sort_index().tolist(),
+                        'destroyed': pd.cut(wards[(wards['is_radiant'] == False) & (wards['is_destroyed'] == True)]['time_placed'], bins=bins).value_counts().sort_index().tolist()
+                    }
+                },
             } if False in current.index else None,
             'all': {
                 'amount': current['amount'].sum(),
@@ -88,13 +103,16 @@ def perform_clustering(
                 'advantage': None,
                 'duration': round(current['duration'].mean()),
                 'time_placed': round(current['time_placed'].mean()),
-                'players': players_dict
-            },
-            'graphs': {
-                'wards': cuts
+                'players': players_dict,
+                'graphs': {
+                    'wards': {
+                        'placed': pd.cut(wards['time_placed'], bins=bins).value_counts().sort_index().tolist(),
+                        'destroyed': pd.cut(wards[wards['is_destroyed'] == True]['time_placed'], bins=bins).value_counts().sort_index().tolist()
+                    }
+                },
             },
         }
-        redis_store.rpush('clusters', json.dumps(cluster, allow_nan=False, default=int))
+        clusters.append(cluster)
 
     average_df = grouped.reset_index('is_radiant')
     average_radiant = average_df[average_df['is_radiant'] == True]
@@ -114,4 +132,6 @@ def perform_clustering(
             'duration': round(average_df['duration'].mean()),
         }
     }
-    redis_store.rpush('clusters', json.dumps(average, allow_nan=False, default=int))
+    clusters.append(average)
+
+    return clusters

@@ -5,6 +5,7 @@ query GetLeaguePlayers($league: Int!)
         tables{
             tablePlayers{
                 steamAccount{
+                    id
                     proSteamAccount{
                         id
                         name

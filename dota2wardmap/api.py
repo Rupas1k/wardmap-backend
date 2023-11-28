@@ -5,7 +5,7 @@ from pathlib import Path
 from gql import gql, Client
 from gql.transport.aiohttp import AIOHTTPTransport
 
-from definitions import ROOT_DIR
+from extensions import ROOT_DIR
 
 
 dotenv.load_dotenv()
@@ -43,16 +43,18 @@ def fetch_league_players(league_id):
     players = execute_graphql('GetLeaguePlayers', {'league': league_id})['league']['tables']['tablePlayers']
     players_return = []
     for player in players:
-        account = player['steamAccount']['proSteamAccount']
+        account = player['steamAccount']
+        name = account['proSteamAccount']['name'] if account.get('proSteamAccount') and account['proSteamAccount'].get('name') else None
         players_return.append({
             'id': account['id'],
-            'name': account['name'],
-            'team': {
-                'id': account['team']['id'],
-                'name': account['team']['name']
-            }
+            'name': name,
         })
     return players_return
+
+
+def fetch_league_info(league_id):
+    league_info = execute_graphql('GetLeagueInfo', {'league': league_id})['league']
+    return league_info
 
 
 def execute_graphql(query_name, params):
@@ -62,4 +64,4 @@ def execute_graphql(query_name, params):
 
 if __name__ == '__main__':
     import json
-    print(json.dumps(fetch_league_players(15728), indent=4))
+    print(json.dumps(fetch_league_info(15728), indent=4))

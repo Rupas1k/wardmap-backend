@@ -5,7 +5,7 @@ from flask import Blueprint
 
 import api
 from models import Matches
-from definitions import db, scheduler, redis_store
+from extensions import db, scheduler, redis_store
 
 
 bp = Blueprint('parser', __name__)
