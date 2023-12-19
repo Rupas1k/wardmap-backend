@@ -1,7 +1,7 @@
 import json
 
 from sqlalchemy import select
-from flask import Blueprint, Response, request, render_template
+from flask import Blueprint, Response, request
 from sqlalchemy.dialects.postgresql import insert
 
 import api
@@ -10,16 +10,6 @@ from extensions import db, redis_store
 from main import perform_clustering
 
 bp = Blueprint('views', __name__)
-
-@bp.route('/')
-def main():
-    return render_template('index.html')
-
-
-@bp.route('/league/<int:league_id>')
-def league(league_id):
-    return render_template('index.html')
-
 
 
 @bp.route('/clusters')
@@ -91,7 +81,7 @@ def get_wards():
 
 @bp.route('/get_clusters/<int:league_id>')
 def get_clusters(league_id):
-    data = redis_store.lrange(league_id, 0, -1)
+    data = [json.loads(cluster) for cluster in redis_store.lrange(league_id, 0, -1)]
     metadata = redis_store.get('metadata')
     response = Response(json.dumps({
         # 'metadata': metadata,
@@ -109,12 +99,16 @@ def get_task():
     return response
 
 
-@bp.route('/queue_league/<league_id>')
-def queue_league(league_id):
-    db_ids = set(db.session.execute(
-        select(Matches.id, Matches.league_id).filter(Matches.league_id == int(league_id))).scalars().all())
+@bp.route('/queue_league/<int:league_id>')
+def queue_league(league_id: int):
+    if not db.session.query(Leagues).filter(Leagues.id == league_id).first():
+        league_info = api.fetch_league_info(league_id)
+        db.session.add(Leagues(id=league_id, name=league_info['displayName']))
+        parse_league_players(league_id)
+
+    db_ids = set(db.session.execute(select(Matches.id, Matches.league_id).filter(Matches.league_id == league_id)).scalars().all())
     redis_ids = set(int(replay) for replay in redis_store.lrange('replays', 0, -1))
-    matches = {match['id'] for match in api.fetch_league_games(int(league_id))}
+    matches = {match['id'] for match in api.fetch_league_games(league_id)}
     for match_id in matches - db_ids - redis_ids:
         redis_store.rpush('replays', match_id)
     response = Response()
@@ -122,9 +116,9 @@ def queue_league(league_id):
 
 
 @bp.route('/parse_league_players/<int:league_id>')
-def parse_league_players(league_id):
+def parse_league_players(league_id: int):
     db_ids = set(db.session.execute(select(Players.id)).scalars().all())
-    players = api.fetch_league_players(int(league_id))
+    players = api.fetch_league_players(league_id)
     league = db.session.query(Leagues).filter(Leagues.id == league_id).first()
     for player in players:
         if player['id'] not in db_ids:

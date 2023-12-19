@@ -1,4 +1,4 @@
-from sqlalchemy import Column, event, String, Integer, BigInteger, SmallInteger, Boolean, ForeignKey
+from sqlalchemy import Column, String, Integer, BigInteger, SmallInteger, Boolean, ForeignKey
 from sqlalchemy.orm import mapped_column, relationship
 
 from extensions import db
