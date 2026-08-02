@@ -10,3 +10,8 @@ requires-python = ">=3.13"
 [tool.maturin]
 bindings = "pyo3"
 module-name = "d2wm_parser"
+include = [
+    { path = "d2wm_parser/__init__.py", format = "wheel" },
+    { path = "d2wm_parser/__init__.pyi", format = "wheel" },
+    { path = "d2wm_parser/py.typed", format = "wheel" },
+]
