@@ -1,5 +1,12 @@
 .env
+venv
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+d2wm-parser/target/
 .idea
+.vscode
 dota2wardmap/.ipynb_checkpoints
 dota2wardmap/graphql/graphql.config.yml
 dota2wardmap/static
