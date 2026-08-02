@@ -1,0 +1,1 @@
+set PYTHONPATH=dota2wardmap && set FLASK_APP=dota2wardmap && flask run

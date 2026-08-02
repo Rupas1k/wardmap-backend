@@ -1,5 +1,6 @@
 import json
 
+import sqlalchemy as sa
 from sqlalchemy import select
 from flask import Blueprint, Response, request
 from sqlalchemy.dialects.postgresql import insert
@@ -22,7 +23,8 @@ def clusters():
         'min_cluster_size': 10,
         'cluster_selection_method': 'eom',
         'league_id': 15909,
-        'public': False
+        'public': False,
+        'is_obs': True
     }
 
     values = {**default_values, **request.args}
@@ -35,7 +37,8 @@ def clusters():
         min_samples=values['min_samples'],
         min_cluster_size=values['min_cluster_size'],
         cluster_selection_method=values['cluster_selection_method'],
-        version=int(redis_store.get('version'))
+        version=int(redis_store.get('version')),
+        is_obs=bool(int(values['is_obs']))
     ).on_conflict_do_update(
         constraint='maps_pkey',
         set_=dict(
@@ -47,9 +50,9 @@ def clusters():
         )
     ))
 
-    redis_store.delete(values['league_id'])
+    redis_store.delete(f"{values['league_id']}-{values['is_obs']}")
     for cluster in clustered:
-        redis_store.rpush(values['league_id'], json.dumps(cluster, allow_nan=False, default=int))
+        redis_store.rpush(f"{values['league_id']}-{values['is_obs']}", json.dumps(cluster, allow_nan=False, default=int))
 
     db.session.commit()
 
@@ -72,16 +75,17 @@ def get_version():
 @bp.route('/get_wards')
 def get_wards():
     data = json.dumps([row._asdict() for row in db.session.execute(
-        select(Wards.id, Wards.x_pos, Wards.y_pos, Wards.z_pos, Wards.duration, Wards.time_placed).where(
-            Wards.is_obs == True).order_by(Wards.id.desc()).limit(50000)).all()])
+        select(Wards.id, Wards.x_pos, Wards.y_pos, Wards.z_pos, Wards.duration, Wards.time_placed).join(Matches).where(
+            sa.and_(Wards.is_obs == True, Matches.league_id == 15910)).order_by(Wards.id.desc()).limit(50000)).all()])
     response = Response(data)
     response.headers['Content-type'] = 'Application/json'
+    response.headers['Access-Control-Allow-Origin'] = '*'
     return response
 
 
-@bp.route('/get_clusters/<int:league_id>')
-def get_clusters(league_id):
-    data = [json.loads(cluster) for cluster in redis_store.lrange(league_id, 0, -1)]
+@bp.route('/get_clusters/<int:league_id>/<int:is_obs>')
+def get_clusters(league_id: int, is_obs: int):
+    data = [json.loads(cluster) for cluster in redis_store.lrange(f"{league_id}-{is_obs}", 0, -1)]
     metadata = redis_store.get('metadata')
     response = Response(json.dumps({
         # 'metadata': metadata,
@@ -90,7 +94,6 @@ def get_clusters(league_id):
     response.headers['Content-type'] = 'Application/json'
     response.headers['Access-Control-Allow-Origin'] = '*'
     return response
-
 
 @bp.route('/get_task')
 def get_task():

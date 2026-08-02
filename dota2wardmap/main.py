@@ -1,3 +1,4 @@
+import numpy
 import pandas as pd
 from sklearn.cluster import HDBSCAN
 
@@ -16,14 +17,16 @@ def perform_clustering(
         min_samples=10,
         min_cluster_size=10,
         cluster_selection_method='eom',
-        league_id=15909,
+        league_id=15910,
+        min_match=0,
+        is_obs=True,
         n_jobs=-1,
 ):
     clusters = []
 
     df = pd.DataFrame(pd.read_sql(
         sql=select(Wards, Matches, Players).join(Players, Wards.player_placed).join(Matches).where(
-            sa.and_(Wards.is_obs, Matches.league_id == league_id)).order_by(Matches.id.desc()),
+            sa.and_(Wards.is_obs == is_obs, Matches.league_id == league_id, Matches.id >= min_match)).order_by(Matches.id.desc()),
         con=db.engine
     ))
 

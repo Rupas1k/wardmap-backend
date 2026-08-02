@@ -1,4 +1,6 @@
 import os
+import threading
+
 import dotenv
 
 from flask import Flask
@@ -6,13 +8,15 @@ from flask import Flask
 import views
 import parser
 
+import replay_parser
+
 from extensions import db, migrate, redis_store, scheduler
 
 
 dotenv.load_dotenv()
 
 
-def create_app():
+def create_app() -> Flask:
     app = Flask(__name__)
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ['DB_URL']
     app.config['REDIS_URL'] = os.environ['REDIS_URL']
@@ -22,7 +26,7 @@ def create_app():
 
     with app.app_context():
         db.create_all()
-        init_scheduler()
+        init_scheduler(app)
 
     return app
 
@@ -38,8 +42,9 @@ def register_blueprints(app):
     app.register_blueprint(parser.bp)
 
 
-def init_scheduler():
-    if int(os.environ['PARSER']):
-        scheduler.start()
+def init_scheduler(app):
+    # if int(os.environ['PARSER']):
+    #     scheduler.start()
     if int(os.environ['INITIAL_PARSING']):
-        parser.parse()
+        thread = threading.Thread(target=replay_parser.init_parser, args=(app, ), daemon=True)
+        thread.start()

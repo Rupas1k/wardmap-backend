@@ -54,6 +54,8 @@ class Wards(db.Model):
     radiant_networth = mapped_column(Integer, nullable=True)
     dire_networth = mapped_column(Integer, nullable=True)
 
+    npc_killed = mapped_column(String, nullable=True)
+
     match = relationship('Matches', back_populates='wards')
     player_placed = relationship('Players', foreign_keys=[player_placed_id], back_populates='wards_placed')
     player_destroyed = relationship('Players', foreign_keys=[player_destroyed_id], back_populates='wards_destroyed')
@@ -72,6 +74,7 @@ class Players(db.Model):
 class Maps(db.Model):
     # id = mapped_column(Integer, primary_key=True, autoincrement=True)
     league_id = mapped_column(Integer, ForeignKey('leagues.id'), primary_key=True)
+    is_obs = mapped_column(Boolean, primary_key=True)
     public = mapped_column(Boolean)
     min_cluster_size = mapped_column(SmallInteger)
     min_samples = mapped_column(SmallInteger)
