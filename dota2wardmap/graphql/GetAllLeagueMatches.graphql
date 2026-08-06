@@ -1,8 +1,0 @@
- query GetAllLeagueMatches($take: Int!, $skip: Int!, $league_id: Int!)
- {
- 	league(id: $league_id){
-     matches(request: {take: $take, skip: $skip}){
-       id
-     }
-   }
- }

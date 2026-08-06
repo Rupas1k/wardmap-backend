@@ -1,7 +1,0 @@
-query GetLeagueInfo($league: Int!)
-{
-    league(id: $league) {
-        id
-        displayName
-    }
-}

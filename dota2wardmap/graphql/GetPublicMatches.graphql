@@ -1,9 +1,0 @@
-query GetPublicMatches($take: Int!, $skip: Int!)
-{
-    live{
-        matches(request: {take: $take, skip: $skip, orderBy: AVERAGE_RANK}){
-            matchId
-            averageRank
-        }
-    }
-}

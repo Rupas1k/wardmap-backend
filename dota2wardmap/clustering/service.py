@@ -5,14 +5,14 @@ import sqlalchemy as sa
 from sklearn.cluster import HDBSCAN
 from sqlalchemy import select
 
-from .extensions import db
-from .models import Matches, Players, Wards
+from ..extensions import db
+from ..models import Match, Player, Ward
 
 pd.set_option("display.max_columns", None)
 
 
-def perform_clustering(
-    cluster_selection_epsilon=64,
+def calculate_clusters(
+    cluster_selection_epsilon=0,
     min_samples=10,
     min_cluster_size=10,
     cluster_selection_method="eom",
@@ -25,14 +25,17 @@ def perform_clustering(
 
     df = pd.DataFrame(
         pd.read_sql(
-            sql=select(Wards, Matches, Players)
-            .join(Players, Wards.player_placed)
-            .join(Matches)
-            .where(sa.and_(Wards.is_obs == is_obs, Matches.league_id == league_id, Matches.id >= min_match))
-            .order_by(Matches.id.desc()),
+            sql=select(Ward, Match, Player)
+            .join(Player, Ward.player_placed)
+            .join(Match)
+            .where(sa.and_(Ward.is_obs == is_obs, Match.league_id == league_id, Match.id >= min_match))
+            .order_by(Match.id.desc()),
             con=db.engine,
         )
     )
+
+    if len(df) < int(min_cluster_size):
+        return []
 
     hdbscan = HDBSCAN(
         cluster_selection_epsilon=int(cluster_selection_epsilon),
@@ -40,6 +43,7 @@ def perform_clustering(
         min_cluster_size=int(min_cluster_size),
         cluster_selection_method=cluster_selection_method,
         n_jobs=int(n_jobs),
+        copy=False,
     )
     hdbscan.fit(df[["x_pos", "y_pos"]])
 

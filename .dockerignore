@@ -1,0 +1,16 @@
+.git
+.github
+.idea
+.vscode
+.venv
+.pytest_cache
+.ruff_cache
+**/__pycache__
+**/*.py[cod]
+**/*.so
+replay_parser/target
+clustering.ipynb
+tests
+.env
+README.md
+run.bat

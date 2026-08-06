@@ -1,4 +1,87 @@
+name: dota2wardmap-back
+
+x-backend: &backend
+  build: .
+  stop_grace_period: 2m
+  environment:
+    DB_URL: postgresql+psycopg2://${POSTGRES_USER:-dota2wardmap}:${POSTGRES_PASSWORD:-dota2wardmap}@postgres:5432/${POSTGRES_DB:-dota2wardmap}
+    REDIS_URL: redis://redis:6379/0
+    OPENDOTA_API_KEY: ${OPENDOTA_API_KEY:-}
+    OPENDOTA_API_URL: ${OPENDOTA_API_URL:-https://api.opendota.com/api}
+    OPENDOTA_TIMEOUT: ${OPENDOTA_TIMEOUT:-30}
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    PARSER_WORKERS: ${PARSER_WORKERS:-4}
+    COLLECTOR_INTERVAL_SECONDS: ${COLLECTOR_INTERVAL_SECONDS:-300}
+    CLUSTER_BATCH_DELAY_SECONDS: ${CLUSTER_BATCH_DELAY_SECONDS:-30}
+    CLUSTER_BATCH_MAX_WAIT_SECONDS: ${CLUSTER_BATCH_MAX_WAIT_SECONDS:-120}
+    JOB_RETENTION_DAYS: ${JOB_RETENTION_DAYS:-7}
+    JOB_CLEANUP_INTERVAL_SECONDS: ${JOB_CLEANUP_INTERVAL_SECONDS:-3600}
+    CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+    ANONYMOUS_RATE_LIMIT_PER_MINUTE: ${ANONYMOUS_RATE_LIMIT_PER_MINUTE:-60}
+    ADVANCED_RATE_LIMIT_PER_MINUTE: ${ADVANCED_RATE_LIMIT_PER_MINUTE:-600}
+    ADMIN_RATE_LIMIT_PER_MINUTE: ${ADMIN_RATE_LIMIT_PER_MINUTE:-0}
+    ANONYMOUS_MAX_WARD_PAGE_SIZE: ${ANONYMOUS_MAX_WARD_PAGE_SIZE:-1000}
+    ADVANCED_MAX_WARD_PAGE_SIZE: ${ADVANCED_MAX_WARD_PAGE_SIZE:-5000}
+    ADMIN_MAX_WARD_PAGE_SIZE: ${ADMIN_MAX_WARD_PAGE_SIZE:-10000}
+    RUST_BACKTRACE: "full"
+
 services:
+  api:
+    <<: *backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${API_PORT:-5000}:5000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  migrate:
+    <<: *backend
+    command:
+      - /bin/sh
+      - -c
+      - |
+        exec flask --app dota2wardmap:create_app db upgrade
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  match-collector:
+    <<: *backend
+    restart: unless-stopped
+    command: ["python", "-m", "dota2wardmap.replay.collector"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  replay-worker:
+    <<: *backend
+    restart: unless-stopped
+    command: ["python", "-m", "dota2wardmap.replay.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  cluster-worker:
+    <<: *backend
+    restart: unless-stopped
+    command: ["python", "-m", "dota2wardmap.clustering.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
   postgres:
     image: postgres:17
     restart: unless-stopped

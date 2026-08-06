@@ -1,6 +1,7 @@
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use hashbrown::HashMap;
 use pyo3::prelude::*;
+use std::any::Any;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -62,7 +63,11 @@ impl App {
         if let Ok(start_time) = self.game_time.borrow().start_time() {
             while let Some((ward, tick, event)) = self.pending_entries.pop_front() {
                 let handle = ward.handle();
-                let entry = self.handle_to_entry[&handle];
+                let entry = self
+                    .handle_to_entry
+                    .get(&handle)
+                    .copied()
+                    .ok_or_else(|| anyhow!("Ward handle {handle} has no placement entry"))?;
                 let placed_tick = entry.placed_tick;
                 let duration = (((tick - placed_tick) as f32) / 30.0) as i32;
                 let time_placed = (placed_tick as f32 / 30.0 - start_time) as i32;
@@ -75,7 +80,14 @@ impl App {
                     is_radiant: entry.is_radiant,
                     event: event.to_string(),
                     post_game: false,
-                    player_placed_steam_id: self.players.borrow().hero_to_player[hero_placed].borrow().id,
+                    player_placed_steam_id: self
+                        .players
+                        .borrow()
+                        .hero_to_player
+                        .get(hero_placed)
+                        .ok_or_else(|| anyhow!("Hero {hero_placed} has no player entry"))?
+                        .borrow()
+                        .id,
                     player_destroyed_steam_id: match &event {
                         WardEvent::Killed(killer) => self.players.borrow().hero_to_player.get(killer).map(|x| x.borrow().id),
                         _ => None,
@@ -122,7 +134,13 @@ impl WardsObserver for App {
                 };
                 player_slot >>= 1;
 
-                let player = &self.players.borrow().players[player_slot];
+                let player = self
+                    .players
+                    .borrow()
+                    .players
+                    .get(player_slot)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("Player slot {player_slot} is unavailable"))?;
                 let hero_handle = player.borrow().handle;
 
                 self.handle_to_entry.insert(
@@ -170,10 +188,22 @@ pub fn parse_replay(data: &[u8]) -> PyResult<Vec<Output>> {
         let x = Ok(app.borrow_mut().result.clone());
         x
     })
-    .map_err(|e| PyErr::new::<pyo3::exceptions::PyException, _>(format!("Panic while parsing\n{e:?}")))
+    .map_err(|payload| {
+        PyErr::new::<pyo3::exceptions::PyException, _>(format!("Panic while parsing: {}", panic_message(payload.as_ref())))
+    })
     .and_then(|x| {
         x.map_err(|e: anyhow::Error| PyErr::new::<pyo3::exceptions::PyException, _>(format!("Error while parsing\n{e}")))
     })
+}
+
+fn panic_message(payload: &(dyn Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else {
+        "non-string panic payload".to_string()
+    }
 }
 
 #[pymodule]
