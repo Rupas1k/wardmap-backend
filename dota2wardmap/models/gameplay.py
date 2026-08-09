@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy import (
-    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -15,13 +13,11 @@ from sqlalchemy import (
     Integer,
     SmallInteger,
     String,
-    Text,
-    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .domain import AccessLevel, JobStatus, LeagueTrackingStatus
-from .extensions import db
+from ..domain import LeagueTrackingStatus
+from ..extensions import db
 
 players_matches = db.Table(
     "players_matches",
@@ -44,7 +40,7 @@ class League(db.Model):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str | None] = mapped_column(String)
     tier: Mapped[str | None] = mapped_column(String(32))
-    map_asset_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    map_asset_version: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=2)
     tracking_status: Mapped[str] = mapped_column(
         String(16), nullable=False, default=LeagueTrackingStatus.ACTIVE
     )
@@ -117,7 +113,9 @@ class Ward(db.Model):
     npc_killed: Mapped[str | None] = mapped_column(String)
 
     match: Mapped[Match | None] = relationship(back_populates="wards")
-    player_placed: Mapped[Player | None] = relationship(foreign_keys=[player_placed_id], back_populates="wards_placed")
+    player_placed: Mapped[Player | None] = relationship(
+        foreign_keys=[player_placed_id], back_populates="wards_placed"
+    )
     player_destroyed: Mapped[Player | None] = relationship(
         foreign_keys=[player_destroyed_id], back_populates="wards_destroyed"
     )
@@ -135,84 +133,8 @@ class Player(db.Model):
     wards_destroyed: Mapped[list[Ward]] = relationship(
         foreign_keys=[Ward.player_destroyed_id], back_populates="player_destroyed"
     )
-
     matches: Mapped[list[Match]] = relationship(secondary=players_matches, back_populates="players")
 
     def __init__(self, id: int, name: str | None = None) -> None:
         self.id = id
         self.name = name
-
-
-class ReplayJob(db.Model):
-    __tablename__ = "replay_jobs"
-    __table_args__ = (
-        CheckConstraint("status IN ('pending', 'processing', 'completed', 'failed')", name="ck_replay_jobs_status"),
-        Index("ix_replay_jobs_claim", "status", "created_at"),
-    )
-
-    match_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default=JobStatus.PENDING, index=True)
-    attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
-    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_error: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-    def __init__(self, match_id: int) -> None:
-        self.match_id = match_id
-
-
-class ClusteringJob(db.Model):
-    __tablename__ = "clustering_jobs"
-    __table_args__ = (
-        CheckConstraint("status IN ('pending', 'processing', 'completed', 'failed')", name="ck_clustering_jobs_status"),
-        Index("ix_clustering_jobs_claim", "status", "available_at", "created_at"),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    parameters: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default=JobStatus.PENDING, index=True)
-    attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
-    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_error: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    available_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
-    )
-
-    def __init__(self, parameters: dict[str, Any] | None = None, available_at: datetime | None = None) -> None:
-        if parameters is not None:
-            self.parameters = parameters
-        if available_at is not None:
-            self.available_at = available_at
-
-
-class ApiKey(db.Model):
-    __tablename__ = "api_keys"
-    __table_args__ = (CheckConstraint("access_level IN ('advanced', 'admin')", name="ck_api_keys_access_level"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    owner: Mapped[str] = mapped_column(String(255), nullable=False)
-    key_prefix: Mapped[str] = mapped_column(String(16), nullable=False, unique=True)
-    key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    access_level: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
-
-    def __init__(
-        self,
-        owner: str | None = None,
-        key_prefix: str | None = None,
-        key_hash: str | None = None,
-        access_level: AccessLevel | None = None,
-    ) -> None:
-        if owner is not None:
-            self.owner = owner
-        if key_prefix is not None:
-            self.key_prefix = key_prefix
-        if key_hash is not None:
-            self.key_hash = key_hash
-        if access_level is not None:
-            self.access_level = access_level

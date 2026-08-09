@@ -29,8 +29,6 @@ class Settings:
     cors_origins: tuple[str, ...]
     parser_workers: int
     collector_interval_seconds: int
-    cluster_batch_delay_seconds: int
-    cluster_batch_max_wait_seconds: int
     job_retention_days: int
     job_cleanup_interval_seconds: int
     anonymous_rate_limit: int
@@ -70,8 +68,6 @@ class Settings:
             cors_origins=origins,
             parser_workers=_integer("PARSER_WORKERS", 2, minimum=1),
             collector_interval_seconds=_integer("COLLECTOR_INTERVAL_SECONDS", 300, minimum=60),
-            cluster_batch_delay_seconds=_integer("CLUSTER_BATCH_DELAY_SECONDS", 30),
-            cluster_batch_max_wait_seconds=_integer("CLUSTER_BATCH_MAX_WAIT_SECONDS", 120),
             job_retention_days=_integer("JOB_RETENTION_DAYS", 7, minimum=1),
             job_cleanup_interval_seconds=_integer("JOB_CLEANUP_INTERVAL_SECONDS", 3600, minimum=60),
             anonymous_rate_limit=_integer("ANONYMOUS_RATE_LIMIT_PER_MINUTE", 60),

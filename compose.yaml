@@ -12,8 +12,6 @@ x-backend: &backend
     LOG_LEVEL: ${LOG_LEVEL:-INFO}
     PARSER_WORKERS: ${PARSER_WORKERS:-4}
     COLLECTOR_INTERVAL_SECONDS: ${COLLECTOR_INTERVAL_SECONDS:-300}
-    CLUSTER_BATCH_DELAY_SECONDS: ${CLUSTER_BATCH_DELAY_SECONDS:-30}
-    CLUSTER_BATCH_MAX_WAIT_SECONDS: ${CLUSTER_BATCH_MAX_WAIT_SECONDS:-120}
     JOB_RETENTION_DAYS: ${JOB_RETENTION_DAYS:-7}
     JOB_CLEANUP_INTERVAL_SECONDS: ${JOB_CLEANUP_INTERVAL_SECONDS:-3600}
     CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
@@ -66,16 +64,6 @@ services:
     <<: *backend
     restart: unless-stopped
     command: ["python", "-m", "dota2wardmap.replay.worker"]
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-
-  cluster-worker:
-    <<: *backend
-    restart: unless-stopped
-    command: ["python", "-m", "dota2wardmap.clustering.worker"]
     depends_on:
       migrate:
         condition: service_completed_successfully

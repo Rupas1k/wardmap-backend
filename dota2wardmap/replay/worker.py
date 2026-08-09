@@ -1,5 +1,5 @@
 from .. import create_worker_app
-from .service import run_replay_worker
+from .worker_service import run_replay_worker
 
 
 def main() -> None:

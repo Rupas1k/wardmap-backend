@@ -6,7 +6,7 @@ from werkzeug.exceptions import BadRequest
 
 from ..access import max_ward_page_size
 from ..extensions import db
-from ..models import Match, Ward
+from ..models import Match, Player, Ward
 
 bp = Blueprint("wards", __name__)
 
@@ -30,7 +30,27 @@ def query_wards():
     filters = request.get_json(silent=True) or {}
     if not isinstance(filters, dict):
         raise BadRequest("request body must be a JSON object")
-    query = select(Ward.id, Ward.x_pos, Ward.y_pos, Ward.z_pos).join(Match)
+    query = (
+        select(
+            Ward.id,
+            Ward.match_id,
+            Ward.player_placed_id,
+            Player.name.label("player_name"),
+            Ward.is_radiant,
+            Ward.is_obs,
+            Ward.is_destroyed,
+            Ward.time_placed,
+            Ward.duration,
+            Ward.x_pos,
+            Ward.y_pos,
+            Ward.z_pos,
+            Ward.radiant_networth,
+            Ward.dire_networth,
+            Match.duration.label("match_duration"),
+        )
+        .join(Match)
+        .outerjoin(Player, Player.id == Ward.player_placed_id)
+    )
 
     league_ids = integer_list(filters, "league_ids")
     match_ids = integer_list(filters, "match_ids")

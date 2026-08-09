@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -16,7 +17,15 @@ def response(payload, status_code=200):
 def test_get_league_uses_opendota(monkeypatch):
     request = Mock(return_value=response({"leagueid": 19892, "name": "The International 2026"}))
     monkeypatch.setattr(opendota.requests, "get", request)
-    monkeypatch.setattr(opendota, "API_KEY", None)
+    monkeypatch.setattr(
+        opendota,
+        "get_settings",
+        lambda: SimpleNamespace(
+            opendota_api_url="https://api.opendota.com/api",
+            opendota_api_key=None,
+            opendota_timeout=30,
+        ),
+    )
 
     league = opendota.get_league(19892)
 
@@ -24,7 +33,7 @@ def test_get_league_uses_opendota(monkeypatch):
     request.assert_called_once_with(
         "https://api.opendota.com/api/leagues/19892",
         params=None,
-        timeout=opendota.REQUEST_TIMEOUT,
+        timeout=30,
     )
 
 
@@ -44,7 +53,15 @@ def test_get_league_matches_rejects_invalid_response(monkeypatch):
 def test_api_key_is_sent_when_configured(monkeypatch):
     request = Mock(return_value=response({"match_id": 8871520485}))
     monkeypatch.setattr(opendota.requests, "get", request)
-    monkeypatch.setattr(opendota, "API_KEY", "secret")
+    monkeypatch.setattr(
+        opendota,
+        "get_settings",
+        lambda: SimpleNamespace(
+            opendota_api_url="https://api.opendota.com/api",
+            opendota_api_key="secret",
+            opendota_timeout=30,
+        ),
+    )
 
     opendota.get_match(8871520485)
 

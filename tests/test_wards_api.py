@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, g
 
 from dota2wardmap.api.wards import bp
 from dota2wardmap.extensions import db
@@ -10,6 +10,7 @@ def test_query_wards_applies_dataset_filters():
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
     db.init_app(app)
     app.register_blueprint(bp)
+    app.before_request(lambda: setattr(g, "access_level", "anonymous"))
 
     with app.app_context():
         db.create_all()
@@ -52,7 +53,28 @@ def test_query_wards_applies_dataset_filters():
             )
 
     assert response.status_code == 200
-    assert response.get_json() == {"data": [{"id": 1, "x_pos": 10, "y_pos": 20, "z_pos": 30}]}
+    assert response.get_json() == {
+        "data": [
+            {
+                "id": 1,
+                "match_id": 100,
+                "player_placed_id": 7,
+                "player_name": "Support",
+                "is_radiant": True,
+                "is_obs": True,
+                "is_destroyed": False,
+                "time_placed": 600,
+                "duration": 360,
+                "x_pos": 10,
+                "y_pos": 20,
+                "z_pos": 30,
+                "radiant_networth": None,
+                "dire_networth": None,
+                "match_duration": 2400,
+            }
+        ],
+        "pagination": {"page_size": 1000, "has_more": False, "next_cursor": None},
+    }
 
 
 def test_query_wards_rejects_non_numeric_ids():

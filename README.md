@@ -5,18 +5,17 @@
 ```text
 dota2wardmap/
 ├── api/             # Flask HTTP blueprints
-├── clustering/      # Pandas/HDBSCAN service and worker
 ├── integrations/    # External API clients
-├── replay/          # League collection, replay parsing, persistence, and worker
+├── models/          # Gameplay, access, and job persistence models
+├── replay/          # Replay download, parsing, persistence, and worker
 ├── jobs.py          # Durable PostgreSQL job claiming and retry state
-├── models.py        # Application and job models
 ├── extensions.py    # Shared SQLAlchemy, migration, and Redis clients
 └── migrations/      # Alembic schema migrations
 ```
 
-The API and workers use the same image with different entry points. PostgreSQL
-is authoritative for application data and jobs; Redis contains only rebuildable
-cluster caches.
+The API and replay workers use the same image with different entry points.
+PostgreSQL is authoritative for application data and jobs. Ward clustering is
+performed by the browser client.
 
 ## Run locally
 
@@ -29,15 +28,15 @@ docker compose up -d --build
 ```
 
 Compose automatically reads this repository's `.env`. It starts PostgreSQL,
-Redis, migrations, the Flask API, match collector, replay parser children, and
-clustering worker. The API is available at `http://localhost:5000`.
+Redis, migrations, the Flask API, match collector, and replay parser children.
+The API is available at `http://localhost:5000`.
 
 Operational commands:
 
 ```bash
 docker compose ps -a
 docker compose logs -f
-docker compose logs -f match-collector replay-worker cluster-worker
+docker compose logs -f match-collector replay-worker
 docker compose down
 ```
 
@@ -51,23 +50,11 @@ Its logs identify each child, for example `replay-parser-2`.
 The collector checks PostgreSQL every `COLLECTOR_INTERVAL_SECONDS` and calls
 OpenDota only when an active league's `next_check_at` is due. It adds unseen completed matches as durable replay jobs
 and backs off from 15 minutes to one hour and then six hours when repeated
-checks find nothing new. The replay worker queues server-side observer and
-sentry cluster compilation after parsing.
-Cluster compilation is debounced by `CLUSTER_BATCH_DELAY_SECONDS` (30 seconds
-by default), so a burst of parsed replays produces one rebuild per league and
-ward type after parsing becomes quiet. `CLUSTER_BATCH_MAX_WAIT_SECONDS` (120
-seconds by default) forces a rebuild during continuous parsing so a busy import
-cannot postpone clustering indefinitely.
+checks find nothing new. Once a replay is parsed, its ward records are
+immediately available through the wards API for browser-side clustering.
 
-Clustering runs in a separate worker so the API does not load or execute
-Pandas/scikit-learn.
-
-`POST /api/v1/clusters` adds a durable PostgreSQL job and returns `202`;
-`GET /api/v1/leagues/<league_id>/clusters/<observer|sentry>` returns the last
-completed clustering result from Redis.
-
-Replay and clustering jobs use PostgreSQL so claimed work can be retried after
-a worker failure. Redis is used only for completed cluster caches.
+Replay jobs use PostgreSQL so claimed work can be retried after a worker
+failure. Redis remains in use for API access rate limiting.
 Completed and permanently failed queue records are retained for
 `JOB_RETENTION_DAYS` and then deleted in bounded batches by the collector.
 
@@ -107,7 +94,7 @@ Default policy:
 - Anonymous: 60 requests/minute and at most 1,000 wards per page.
 - Advanced: 600 requests/minute and at most 5,000 wards per page.
 - Admin: no general rate limit and at most 10,000 wards per page.
-- League collection and manually queued clustering require admin access.
+- League collection requires admin access.
 
 All limits are configurable through the corresponding values in
 `.env-example`. `GET /api/v1/auth/me` returns the access level associated with
@@ -175,8 +162,8 @@ last match times, collection schedule, and completion metadata.
 
 Player participation is stored once in `players_matches`. League participation
 is derived through each match's `league_id`; there is intentionally no duplicate
-`players_leagues` table. Cluster output remains rebuildable Redis data, so there
-is no write-only maps or cluster-artifact table.
+`players_leagues` table. Cluster output is calculated and cached by the browser,
+so there is no server-side cluster-artifact table.
 
 The replay parser is the Rust/PyO3 project in `./replay_parser`. It is a local
 dependency in `requirements.txt`, so Maturin builds and installs it with the
@@ -186,7 +173,7 @@ rest of the Python environment:
 pip install -r requirements.txt
 ```
 
-`dota2wardmap/models.py` defines the current schema, while Alembic migrations
+`dota2wardmap/models/` defines the current schema, while Alembic migrations
 under `dota2wardmap/migrations` define how existing databases reach it. Apply
 pending migrations before starting the application:
 
