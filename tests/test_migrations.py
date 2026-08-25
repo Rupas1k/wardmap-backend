@@ -5,7 +5,7 @@ from dota2wardmap.extensions import db
 from dota2wardmap.settings import get_settings
 
 
-def test_upgrade_bootstraps_an_empty_database(monkeypatch, tmp_path):
+def test_upgrade_creates_schema_from_single_baseline(monkeypatch, tmp_path):
     database_path = tmp_path / "fresh.sqlite"
     monkeypatch.setenv("DB_URL", f"sqlite:///{database_path}")
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
