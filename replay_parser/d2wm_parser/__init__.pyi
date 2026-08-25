@@ -16,5 +16,21 @@ class Output:
     vec_z: float
     radiant_networth: int
     dire_networth: int
+    enemy_hero_vision_seconds: float
+    unique_enemy_hero_vision_seconds: float
+    heroes_spotted: int
+    hero_reveal_events: int
+    unique_hero_reveal_events: int
+
+class VisionSample:
+    time: int
+    target_player_steam_id: int
+    target_is_radiant: bool
+    observing_is_radiant: bool
+    is_alive: bool
+    visible_by_enemy: bool
+    provider_count: int
+    provider_kinds: list[str]
 
 def parse_replay(data: bytes) -> list[Output]: ...
+def parse_vision(data: bytes) -> list[VisionSample]: ...

@@ -72,6 +72,10 @@ values.
 Create one key per user or service:
 
 ```bash
+./scripts/create-advanced-token.sh "user@example.com"
+./scripts/create-admin-token.sh "operations"
+
+# Equivalent raw commands:
 docker compose exec api flask --app dota2wardmap:create_app keys create \
   --owner "user@example.com" --access advanced
 
@@ -82,6 +86,10 @@ docker compose exec api flask --app dota2wardmap:create_app keys create \
 List key prefixes and revoke a key without knowing its raw value:
 
 ```bash
+./scripts/list-tokens.sh
+./scripts/revoke-token.sh wm_example
+
+# Equivalent raw commands:
 docker compose exec api flask --app dota2wardmap:create_app keys list
 docker compose exec api flask --app dota2wardmap:create_app keys revoke wm_example
 ```
@@ -89,9 +97,16 @@ docker compose exec api flask --app dota2wardmap:create_app keys revoke wm_examp
 Revocation takes effect on the next request. Create a replacement before
 revoking an active key when rotating credentials.
 
+Team maintenance also has shell wrappers:
+
+```bash
+./scripts/backfill-match-teams.sh --limit 500
+./scripts/refresh-teams.sh --max-age-days 30 --limit 20
+```
+
 Default policy:
 
-- Anonymous: 60 requests/minute and at most 1,000 wards per page.
+- Anonymous: 60 requests/minute and at most 5,000 wards per page.
 - Advanced: 600 requests/minute and at most 5,000 wards per page.
 - Admin: no general rate limit and at most 10,000 wards per page.
 - League collection requires admin access.
@@ -160,6 +175,15 @@ Resuming with `{"status":"active"}` schedules an immediate collection check.
 The league table also owns map asset version, OpenDota tier, observed first and
 last match times, collection schedule, and completion metadata.
 
+To discover new matches and retry failed unparsed jobs for any league without
+deleting successfully parsed data, run:
+
+```bash
+./scripts/refresh-league.sh 19719
+```
+
+Jobs already being processed are left untouched.
+
 Player participation is stored once in `players_matches`. League participation
 is derived through each match's `league_id`; there is intentionally no duplicate
 `players_leagues` table. Cluster output is calculated and cached by the browser,
@@ -179,5 +203,15 @@ pending migrations before starting the application:
 
 ```bash
 flask --app dota2wardmap:create_app db upgrade
+flask --app dota2wardmap:create_app backfill-match-teams
+flask --app dota2wardmap:create_app refresh-teams
 flask --app dota2wardmap:create_app run
 ```
+
+The backfill command enriches previously parsed matches with Radiant/Dire team
+identity and winner metadata from OpenDota. It is resumable; use `--limit N` to
+process historical matches in batches.
+
+Team names, tags, and logos are refreshed only when their metadata is at least
+30 days old. The collector performs this stale-only check on startup; use
+`refresh-teams --max-age-days N` for a manual refresh policy.

@@ -38,6 +38,11 @@ def download_and_parse_replay(match_id: int, result_queue: Queue) -> None:
                 "vec_z": item.vec_z,
                 "radiant_networth": item.radiant_networth,
                 "dire_networth": item.dire_networth,
+                "enemy_hero_vision_seconds": item.enemy_hero_vision_seconds,
+                "unique_enemy_hero_vision_seconds": item.unique_enemy_hero_vision_seconds,
+                "heroes_spotted": item.heroes_spotted,
+                "hero_reveal_events": item.hero_reveal_events,
+                "unique_hero_reveal_events": item.unique_hero_reveal_events,
             }
             for item in output
         ]

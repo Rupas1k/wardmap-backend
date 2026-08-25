@@ -1,14 +1,14 @@
 from datetime import UTC, datetime
 
 from flask import Blueprint, current_app, request
-from sqlalchemy import select
+from sqlalchemy import distinct, func, select
 from werkzeug.exceptions import BadRequest, NotFound
 
 from ..access import require_access
 from ..domain import AccessLevel
 from ..extensions import db
 from ..integrations import opendota
-from ..models import League
+from ..models import League, Match, Ward
 from ..replay.collector import sync_league
 
 bp = Blueprint("matches", __name__)
@@ -60,7 +60,22 @@ def update_league_tracking(league_id: int):
 
 @bp.route("/leagues")
 def leagues():
-    rows = db.session.execute(select(League).order_by(League.id.desc())).scalars().all()
+    parsed = (
+        select(
+            Match.league_id.label("league_id"),
+            func.count(distinct(Match.id)).label("parsed_matches"),
+            func.max(Match.id).label("latest_parsed_match_id"),
+        )
+        .join(Ward, Ward.match_id == Match.id)
+        .where(Match.league_id.is_not(None))
+        .group_by(Match.league_id)
+        .subquery()
+    )
+    rows = db.session.execute(
+        select(League, parsed.c.parsed_matches, parsed.c.latest_parsed_match_id)
+        .outerjoin(parsed, parsed.c.league_id == League.id)
+        .order_by(parsed.c.latest_parsed_match_id.desc().nullslast(), League.id.desc())
+    ).all()
     return {
         "data": [
             {
@@ -69,7 +84,9 @@ def leagues():
                 "version": league.map_asset_version,
                 "tier": league.tier,
                 "tracking_status": league.tracking_status,
+                "parsed_matches": parsed_matches or 0,
+                "latest_parsed_match_id": latest_parsed_match_id,
             }
-            for league in rows
+            for league, parsed_matches, latest_parsed_match_id in rows
         ]
     }

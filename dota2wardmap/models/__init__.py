@@ -1,5 +1,5 @@
 from .access import ApiKey
-from .gameplay import League, Match, Player, Ward, players_matches
+from .gameplay import League, Match, Player, Team, Ward, players_matches
 from .jobs import ReplayJob
 
 __all__ = [
@@ -8,6 +8,7 @@ __all__ = [
     "Match",
     "Player",
     "ReplayJob",
+    "Team",
     "Ward",
     "players_matches",
 ]

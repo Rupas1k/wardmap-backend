@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 
 from ..extensions import db
-from ..models import League, Match, Player, Ward
+from ..models import League, Match, Player, Team, Ward, players_matches
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,11 @@ def persist_parsed_replay(result: ParsedReplay) -> bool:
                     "z_pos": ward_data["z"] * 128 + round(ward_data["vec_z"]),
                     "radiant_networth": ward_data["radiant_networth"],
                     "dire_networth": ward_data["dire_networth"],
+                    "enemy_hero_vision_seconds": ward_data["enemy_hero_vision_seconds"],
+                    "unique_enemy_hero_vision_seconds": ward_data["unique_enemy_hero_vision_seconds"],
+                    "heroes_spotted": ward_data["heroes_spotted"],
+                    "hero_reveal_events": ward_data["hero_reveal_events"],
+                    "unique_hero_reveal_events": ward_data["unique_hero_reveal_events"],
                     "npc_killed": ward_data["npc_killed"],
                 }
             )
@@ -64,6 +69,7 @@ def persist_parsed_replay(result: ParsedReplay) -> bool:
                 duration=match_data["duration"],
             )
             db.session.add(match)
+            apply_match_team_data(match, match_data)
             _attach_players(match, match_data, wards)
             db.session.flush()
 
@@ -82,8 +88,42 @@ def persist_parsed_replay(result: ParsedReplay) -> bool:
         return False
 
 
+def _upsert_team(team_data: dict[str, Any] | None) -> int | None:
+    if not team_data or team_data.get("id") is None:
+        return None
+    team_id = int(team_data["id"])
+    team = db.session.get(Team, team_id)
+    if team is None:
+        team = Team(id=team_id)
+        db.session.add(team)
+    team.name = team_data.get("name") or team.name
+    team.tag = team_data.get("tag") or team.tag
+    team.logo_url = team_data.get("logo_url") or team.logo_url
+    if any(team_data.get(field) for field in ("name", "tag", "logo_url")):
+        team.metadata_updated_at = datetime.now(UTC)
+    return team_id
+
+
+def apply_match_team_data(match: Match, match_data: dict[str, Any]) -> None:
+    match.radiant_team_id = _upsert_team(match_data.get("radiant_team"))
+    match.dire_team_id = _upsert_team(match_data.get("dire_team"))
+    match.radiant_win = match_data.get("radiant_win")
+
+
 def _attach_players(match: Match, match_data: dict[str, Any], wards: list[dict[str, Any]]) -> None:
     player_names = {player["id"]: player.get("name") for player in match_data.get("players", [])}
+    player_sides = {
+        player["id"]: player.get("is_radiant")
+        for player in match_data.get("players", [])
+        if player.get("is_radiant") is not None
+    }
+
+    for ward in wards:
+        if ward["player_placed_id"] is not None and ward["is_radiant"] is not None:
+            player_sides.setdefault(ward["player_placed_id"], ward["is_radiant"])
+        if ward["player_destroyed_id"] is not None and ward["is_radiant"] is not None:
+            player_sides.setdefault(ward["player_destroyed_id"], not ward["is_radiant"])
+
     player_ids = set(player_names)
     player_ids.update(ward["player_placed_id"] for ward in wards if ward["player_placed_id"] is not None)
     player_ids.update(ward["player_destroyed_id"] for ward in wards if ward["player_destroyed_id"] is not None)
@@ -100,5 +140,17 @@ def _attach_players(match: Match, match_data: dict[str, Any], wards: list[dict[s
         elif player.name is None and player_names.get(player_id):
             player.name = player_names[player_id]
 
-        if player not in match.players:
-            match.players.append(player)
+    db.session.flush()
+
+    if player_ids:
+        db.session.execute(
+            players_matches.insert(),
+            [
+                {
+                    "player_id": player_id,
+                    "match_id": match.id,
+                    "is_radiant": player_sides.get(player_id),
+                }
+                for player_id in player_ids
+            ],
+        )

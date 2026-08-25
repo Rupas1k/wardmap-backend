@@ -73,7 +73,7 @@ class Settings:
             anonymous_rate_limit=_integer("ANONYMOUS_RATE_LIMIT_PER_MINUTE", 60),
             advanced_rate_limit=_integer("ADVANCED_RATE_LIMIT_PER_MINUTE", 600),
             admin_rate_limit=_integer("ADMIN_RATE_LIMIT_PER_MINUTE", 0),
-            anonymous_max_ward_page_size=_integer("ANONYMOUS_MAX_WARD_PAGE_SIZE", 1000, minimum=1),
+            anonymous_max_ward_page_size=_integer("ANONYMOUS_MAX_WARD_PAGE_SIZE", 5000, minimum=1),
             advanced_max_ward_page_size=_integer("ADVANCED_MAX_WARD_PAGE_SIZE", 5000, minimum=1),
             admin_max_ward_page_size=_integer("ADMIN_MAX_WARD_PAGE_SIZE", 10000, minimum=1),
         )

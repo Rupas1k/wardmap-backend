@@ -13,6 +13,9 @@ def create_app() -> Flask:
     configure_connections(app)
     register_extensions(app)
     register_access(app)
+    from .replay.cli import register_replay_commands
+
+    register_replay_commands(app)
     register_blueprints(app)
     register_http_handlers(app)
     return app

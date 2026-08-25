@@ -45,3 +45,10 @@ def get_match(match_id: int) -> dict[str, Any]:
     if not isinstance(match, dict) or match.get("match_id") is None:
         raise OpenDotaError(f"Match {match_id} was not found in OpenDota")
     return match
+
+
+def get_team(team_id: int) -> dict[str, Any] | None:
+    team = _get(f"teams/{team_id}")
+    if not isinstance(team, dict) or team.get("team_id") is None:
+        return None
+    return team
