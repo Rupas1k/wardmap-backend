@@ -2,7 +2,9 @@ import logging
 from logging.config import fileConfig
 
 from alembic import context
+from alembic.script import ScriptDirectory
 from flask import current_app
+from sqlalchemy import inspect, text
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -89,6 +91,7 @@ def run_migrations_online():
     connectable = get_engine()
 
     with connectable.connect() as connection:
+        bootstrapped = False
         context.configure(
             connection=connection,
             target_metadata=get_metadata(),
@@ -97,7 +100,39 @@ def run_migrations_online():
         )
 
         with context.begin_transaction():
-            context.run_migrations()
+            # The project adopted Alembic after its original tables had already
+            # been created with db.create_all(). Consequently, the legacy root
+            # revision starts by altering `leagues` instead of creating it (and
+            # later revisions make the same assumption about other tables).
+            # Bootstrap only a genuinely empty database from the current model
+            # metadata; databases containing any table must still follow the
+            # normal migration chain.
+            table_names = set(inspect(connection).get_table_names())
+            empty_version_table = table_names == {"alembic_version"} and not connection.execute(
+                text("SELECT 1 FROM alembic_version LIMIT 1")
+            ).first()
+            if not table_names or empty_version_table:
+                bootstrapped = True
+                get_metadata().create_all(bind=connection)
+                heads = ScriptDirectory.from_config(config).get_heads()
+                if len(heads) != 1:
+                    raise RuntimeError(f"Expected one migration head, found {heads}")
+                context.get_context()._ensure_version_table()
+                connection.execute(
+                    text("INSERT INTO alembic_version (version_num) VALUES (:head)"),
+                    {"head": heads[0]},
+                )
+                context.run_migrations()
+                logger.info("Created current schema and stamped the migration head")
+            else:
+                context.run_migrations()
+
+        # SQLite treats DDL as non-transactional, but SQLAlchemy still opens an
+        # implicit transaction for the version-row INSERT. PostgreSQL commits
+        # through Alembic's transaction above; this covers the SQLite test and
+        # development path without affecting migrated databases.
+        if bootstrapped and connection.in_transaction():
+            connection.commit()
 
 
 if context.is_offline_mode():
