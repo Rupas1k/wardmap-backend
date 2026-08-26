@@ -44,6 +44,28 @@ PostgreSQL is exposed at `localhost:5432` and Redis at `localhost:6379`; both
 ports are bound to localhost. Application/job data and cache data use named
 Docker volumes and survive `docker compose down`.
 
+### Restore PostgreSQL from a backup
+
+The maintenance-only `db-restore` service restores the custom-format dump at
+`POSTGRES_RESTORE_PATH`. The example environment points to the dated dump in
+the parent project directory. Stop database clients first, run the restore,
+and then start the complete stack again:
+
+```bash
+docker compose stop api match-collector replay-worker
+docker compose --profile maintenance run --rm db-restore
+docker compose up -d --build
+```
+
+The restore command terminates remaining connections, drops and recreates only
+the database named by `POSTGRES_DB`, and then loads the dump. It does not remove
+the PostgreSQL volume or the backup file. To use another backup, set an absolute
+or Compose-file-relative path in `.env`, for example:
+
+```dotenv
+POSTGRES_RESTORE_PATH=/srv/backups/dota2wardmap.dump
+```
+
 The replay service uses `PARSER_WORKERS` named native parser child processes.
 Its logs identify each child, for example `replay-parser-2`.
 
