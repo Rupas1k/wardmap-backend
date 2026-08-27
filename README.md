@@ -1,270 +1,127 @@
-# dota2wardmap backend
+# Wardmap backend
 
-## Structure
+Backend services for [Wardmap](https://wardmap.rupasov.dev): a Flask API,
+PostgreSQL-backed replay queue, OpenDota collector, native replay parser, and
+background workers. Browser-side analysis and visualization live in the
+private `Rupas1k/wardmap-stage` repository.
 
-```text
-dota2wardmap/
-├── api/             # Flask HTTP blueprints
-├── integrations/    # External API clients
-├── models/          # Gameplay, access, and job persistence models
-├── replay/          # Replay download, parsing, persistence, and worker
-├── jobs.py          # Durable PostgreSQL job claiming and retry state
-├── extensions.py    # Shared SQLAlchemy, migration, and Redis clients
-└── migrations/      # Alembic schema migrations
-```
+## Quick start
 
-The API and replay workers use the same image with different entry points.
-PostgreSQL is authoritative for application data and jobs. Ward clustering is
-performed by the browser client.
-
-## Run locally
-
-The backend repository is self-contained. Use the project console to create the
-local configuration and start the complete stack:
+Requirements: Docker with Compose, Git, curl, SSH, and a POSIX shell. Clone the
+repository, create the local environment, and start the complete stack:
 
 ```bash
+git clone https://github.com/Rupas1k/wardmap-backend.git dota2wardmap-back
+cd dota2wardmap-back
+
 ./wardmap init
+./wardmap doctor
 ./wardmap up
-```
-
-Compose automatically reads this repository's `.env`. It starts PostgreSQL,
-Redis, migrations, the Flask API, match collector, and replay parser children.
-The API is available at `http://localhost:5000`.
-
-Common operational commands:
-
-```bash
-./wardmap status
-./wardmap logs
-./wardmap logs match-collector replay-worker
 ./wardmap health
-./wardmap down
 ```
 
-PostgreSQL is exposed at `localhost:5432` and Redis at `localhost:6379`; both
-ports are bound to localhost. Application/job data and cache data use named
-Docker volumes and survive `docker compose down`.
+The API is available at <http://localhost:5000>. PostgreSQL and Redis are bound
+to localhost on ports `5432` and `6379`; their named volumes survive
+`./wardmap down`.
 
-### Restore PostgreSQL from a backup
-
-The maintenance-only `db-restore` service restores the custom-format dump at
-`POSTGRES_RESTORE_PATH`. The example environment points to the dated dump in
-the parent project directory. Stop database clients first, run the restore,
-and then start the complete stack again:
-
-```bash
-docker compose stop api match-collector replay-worker
-docker compose --profile maintenance run --rm db-restore
-docker compose up -d --build
-```
-
-The restore command terminates remaining connections, drops and recreates only
-the database named by `POSTGRES_DB`, and then loads the dump. It does not remove
-the PostgreSQL volume or the backup file. To use another backup, set an absolute
-or Compose-file-relative path in `.env`, for example:
-
-```dotenv
-POSTGRES_RESTORE_PATH=/srv/backups/dota2wardmap.dump
-```
-
-The replay service uses `PARSER_WORKERS` named native parser child processes.
-Its logs identify each child, for example `replay-parser-2`.
-
-The collector checks PostgreSQL every `COLLECTOR_INTERVAL_SECONDS` and calls
-OpenDota only when an active league's `next_check_at` is due. It adds unseen completed matches as durable replay jobs
-and backs off from 15 minutes to one hour and then six hours when repeated
-checks find nothing new. Once a replay is parsed, its ward records are
-immediately available through the wards API for browser-side clustering.
-
-Replay jobs use PostgreSQL so claimed work can be retried after a worker
-failure. Redis remains in use for API access rate limiting.
-Completed and permanently failed queue records are retained for
-`JOB_RETENTION_DAYS` and then deleted in bounded batches by the collector.
-
-`POST /api/v1/wards/query` uses cursor pagination with a page-size ceiling
-determined by the caller's access level. Health probes are available at
-`/health/live` and `/health/ready`.
-
-## API access
-
-Read endpoints support anonymous access. Advanced and administrator access use
-unique revocable API keys sent as `Authorization: Bearer <key>`. Keys are shown
-only once when created; PostgreSQL stores their SHA-256 hashes, not the raw
-values.
-
-Create one key per user or service:
-
-```bash
-./wardmap keys create --owner "user@example.com" --access advanced
-./wardmap keys create --owner "operations" --access admin
-```
-
-List key prefixes and revoke a key without knowing its raw value:
-
-```bash
-./wardmap keys list
-./wardmap keys revoke wm_example
-```
-
-Revocation takes effect on the next request. Create a replacement before
-revoking an active key when rotating credentials.
-
-Team maintenance is available from the same console:
-
-```bash
-./wardmap backfill-match-teams --limit 500
-./wardmap refresh-teams --max-age-days 30 --limit 20
-```
-
-Default policy:
-
-- Anonymous: 60 requests/minute and at most 5,000 wards per page.
-- Advanced: 600 requests/minute and at most 5,000 wards per page.
-- Admin: no general rate limit and at most 10,000 wards per page.
-- League collection requires admin access.
-
-All limits are configurable through the corresponding values in
-`.env-example`. `GET /api/v1/auth/me` returns the access level associated with
-the current request. The browser UI stores a supplied key in `sessionStorage`,
-so it is cleared when the browser session ends; avoid entering keys on an
-untrusted device.
+For a new workstation with both repositories, follow
+[Development setup](docs/development.md). For a production host, follow
+[Server deployment](docs/deployment.md).
 
 ## Project console
 
-Run `./wardmap help` for the complete command list. The console covers setup,
-Docker Compose lifecycle, logs, health checks, Flask maintenance commands,
-database backups and restores, tests, container shells, and the server tunnel.
-It can be called from any working directory.
+`./wardmap` is the supported interface for local development and operations.
+Run `./wardmap help` for every command.
 
 ```bash
-./wardmap doctor
-./wardmap build
-./wardmap infra
-./wardmap up
-./wardmap restart api replay-worker
-./wardmap shell api
-./wardmap test
+./wardmap up                              # build and start the stack
+./wardmap status                          # show every container
+./wardmap logs api replay-worker          # follow selected logs
+./wardmap test                            # run the local Python test suite
+./wardmap migrate                         # apply pending migrations
+./wardmap db dump backups/wardmap.dump    # create a database backup
+./wardmap shell api                       # open a container shell
+./wardmap deploy                          # update production over Tailscale
 ```
 
-Use `app` for any Flask command that does not have a short alias, and `compose`
-as an escape hatch for any Docker Compose operation:
+The `app` and `compose` commands remain escape hatches for operations without a
+short alias:
 
 ```bash
 ./wardmap app routes
 ./wardmap compose top
-./wardmap run flask --app dota2wardmap:create_app routes
 ```
 
-Database operations are grouped under `db`:
+## Services
+
+| Service | Responsibility |
+| --- | --- |
+| `api` | Flask HTTP API and access control |
+| `match-collector` | Discovers completed league matches through OpenDota |
+| `replay-worker` | Downloads and parses replay jobs with native parser children |
+| `migrate` | Applies Alembic migrations before application services start |
+| `postgres` | Authoritative application and job data |
+| `redis` | API rate limiting |
+
+The Python application is under `dota2wardmap/`. The Rust/PyO3 parser is an
+internal package under `replay_parser/` and is built into the shared backend
+image.
+
+## Maintenance commands
 
 ```bash
-./wardmap db current
-./wardmap migrate
-./wardmap db shell
-./wardmap db dump backups/wardmap.dump
-./wardmap db restore backups/wardmap.dump
+./wardmap refresh-league 20026
+./wardmap reparse-leagues --league-id 20026
+./wardmap backfill-match-teams --limit 500
+./wardmap backfill-player-sides --league-id 20026
+./wardmap refresh-teams --max-age-days 30 --limit 20
 ```
 
-Restore stops the API and workers while replacing the database, then starts
-them again. It requires confirmation unless `--yes` is supplied. Backups use
-PostgreSQL's portable custom format.
-
-For laptop access to PostgreSQL and Redis on the home server, run
-`./wardmap tunnel`. Override the destination with `WARDMAP_SSH_HOST` or pass an
-SSH host as the first argument. The default local forwarded ports are `15432`
-and `16379`.
-
-After pushing production changes to GitHub, update both repositories and stacks
-on the home server with:
+API keys are displayed once and stored as hashes:
 
 ```bash
-./wardmap deploy
+./wardmap keys create --owner operations --access admin
+./wardmap keys create --owner analyst@example.com --access advanced
+./wardmap keys list
+./wardmap keys revoke wm_example
 ```
 
-This invokes `/home/artemrupasov/update-wardmap` remotely. It does not replace
-the local development commands or deploy uncommitted files.
+Read endpoints permit anonymous access. Rate limits and page-size ceilings for
+anonymous, advanced, and administrator access are configured in `.env` from
+the documented values in `.env-example`.
 
-The tracked implementation lives at `ops/update-wardmap`. Install it on the
-server once as a stable command:
+## API and data model
+
+- HTTP blueprints are mounted under `/api/v1`.
+- Liveness and readiness probes are `/health/live` and `/health/ready`.
+- PostgreSQL stores application data and durable replay jobs.
+- Redis is not the replay queue; it is used for API rate limiting.
+- Ward clustering and derived analysis are performed and cached by the browser.
+- Alembic migrations under `dota2wardmap/migrations/` define schema evolution.
+
+OpenDota supplies league metadata, completed matches, participants, and replay
+metadata. `OPENDOTA_API_KEY` is optional but recommended for higher request
+limits.
+
+## Quality checks
+
+CI runs the following on Python 3.13:
 
 ```bash
-ln -sfn \
-  /home/artemrupasov/projects/d2wm/dota2wardmap-back/ops/update-wardmap \
-  /home/artemrupasov/update-wardmap
+ruff check .
+pyright
+python -m pytest
 ```
 
-It updates both applications by default. On the server, either side can also be
-updated independently:
+Create `.venv` and install `requirements.txt`, Ruff, and Pyright to run the same
+checks locally. Full instructions are in [Development setup](docs/development.md).
 
-```bash
-/home/artemrupasov/update-wardmap backend
-/home/artemrupasov/update-wardmap frontend
-```
+## Documentation
 
-## External dependencies
-
-League metadata, completed league matches, match participants, and replay
-metadata come from OpenDota. The public API works without credentials. Set the
-optional `OPENDOTA_API_KEY` in `.env` when higher API limits are needed.
-
-`POST /api/v1/leagues/<league_id>/queue` queues completed matches returned by
-OpenDota. Live
-match discovery is intentionally not part of the application. Players are
-learned from each completed match while its replay is processed because
-OpenDota does not provide a canonical historical league-roster endpoint.
-
-League collection status is `active`, `paused`, or `completed`. Since OpenDota
-does not expose an authoritative tournament end state, an administrator changes
-that state explicitly:
-
-```bash
-curl --request POST \
-  --header "Authorization: Bearer $WARDMAP_ADMIN_KEY" \
-  --header "Content-Type: application/json" \
-  --data '{"status":"completed"}' \
-  http://localhost:5000/api/v1/leagues/19892/tracking
-```
-
-Resuming with `{"status":"active"}` schedules an immediate collection check.
-The league table also owns map asset version, OpenDota tier, observed first and
-last match times, collection schedule, and completion metadata.
-
-To discover new matches and retry failed unparsed jobs for any league without
-deleting successfully parsed data, run:
-
-```bash
-./wardmap refresh-league 19719
-```
-
-Jobs already being processed are left untouched.
-
-Player participation is stored once in `players_matches`. League participation
-is derived through each match's `league_id`; there is intentionally no duplicate
-`players_leagues` table. Cluster output is calculated and cached by the browser,
-so there is no server-side cluster-artifact table.
-
-The replay parser is the Rust/PyO3 project in `./replay_parser`. It is a local
-dependency in `requirements.txt`, so Maturin builds and installs it with the
-rest of the Python environment:
-
-```bash
-pip install -r requirements.txt
-```
-
-`dota2wardmap/models/` defines the current schema, while Alembic migrations
-under `dota2wardmap/migrations` define how existing databases reach it. Apply
-pending migrations before starting the application:
-
-```bash
-./wardmap migrate
-./wardmap backfill-match-teams
-./wardmap refresh-teams
-```
-
-The backfill command enriches previously parsed matches with Radiant/Dire team
-identity and winner metadata from OpenDota. It is resumable; use `--limit N` to
-process historical matches in batches.
-
-Team names, tags, and logos are refreshed only when their metadata is at least
-30 days old. The collector performs this stale-only check on startup; use
-`refresh-teams --max-age-days N` for a manual refresh policy.
+- [Development setup](docs/development.md) — new machine, both repositories,
+  local services, tests, and daily workflow
+- [Server deployment](docs/deployment.md) — production host, updater, restore,
+  backups, Tailscale, and Cloudflare Tunnel
+- [Ward analytics roadmap](docs/ward-analytics-roadmap.md)
+- [Vision and observer metrics](docs/vision-observer-metrics.md)
+- [Ward impact score](docs/ward-impact-score.md)
