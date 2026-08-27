@@ -19,25 +19,26 @@ performed by the browser client.
 
 ## Run locally
 
-The backend repository is self-contained. Copy the example environment once,
-review its values, and start the complete stack from this directory:
+The backend repository is self-contained. Use the project console to create the
+local configuration and start the complete stack:
 
 ```bash
-cp .env-example .env
-docker compose up -d --build
+./wardmap init
+./wardmap up
 ```
 
 Compose automatically reads this repository's `.env`. It starts PostgreSQL,
 Redis, migrations, the Flask API, match collector, and replay parser children.
 The API is available at `http://localhost:5000`.
 
-Operational commands:
+Common operational commands:
 
 ```bash
-docker compose ps -a
-docker compose logs -f
-docker compose logs -f match-collector replay-worker
-docker compose down
+./wardmap status
+./wardmap logs
+./wardmap logs match-collector replay-worker
+./wardmap health
+./wardmap down
 ```
 
 PostgreSQL is exposed at `localhost:5432` and Redis at `localhost:6379`; both
@@ -94,36 +95,25 @@ values.
 Create one key per user or service:
 
 ```bash
-./scripts/create-advanced-token.sh "user@example.com"
-./scripts/create-admin-token.sh "operations"
-
-# Equivalent raw commands:
-docker compose exec api flask --app dota2wardmap:create_app keys create \
-  --owner "user@example.com" --access advanced
-
-docker compose exec api flask --app dota2wardmap:create_app keys create \
-  --owner "operations" --access admin
+./wardmap keys create --owner "user@example.com" --access advanced
+./wardmap keys create --owner "operations" --access admin
 ```
 
 List key prefixes and revoke a key without knowing its raw value:
 
 ```bash
-./scripts/list-tokens.sh
-./scripts/revoke-token.sh wm_example
-
-# Equivalent raw commands:
-docker compose exec api flask --app dota2wardmap:create_app keys list
-docker compose exec api flask --app dota2wardmap:create_app keys revoke wm_example
+./wardmap keys list
+./wardmap keys revoke wm_example
 ```
 
 Revocation takes effect on the next request. Create a replacement before
 revoking an active key when rotating credentials.
 
-Team maintenance also has shell wrappers:
+Team maintenance is available from the same console:
 
 ```bash
-./scripts/backfill-match-teams.sh --limit 500
-./scripts/refresh-teams.sh --max-age-days 30 --limit 20
+./wardmap backfill-match-teams --limit 500
+./wardmap refresh-teams --max-age-days 30 --limit 20
 ```
 
 Default policy:
@@ -139,35 +129,77 @@ the current request. The browser UI stores a supplied key in `sessionStorage`,
 so it is cleared when the browser session ends; avoid entering keys on an
 untrusted device.
 
-## Application image
+## Project console
 
-Build the production image, including the native Rust parser:
-
-```bash
-docker build --tag dota2wardmap-back .
-```
-
-### Helper scripts
-
-The same workflow is available through scripts that can be called from any
-working directory:
+Run `./wardmap help` for the complete command list. The console covers setup,
+Docker Compose lifecycle, logs, health checks, Flask maintenance commands,
+database backups and restores, tests, container shells, and the server tunnel.
+It can be called from any working directory.
 
 ```bash
-./scripts/services-up.sh
-./scripts/build.sh
-./scripts/migrate.sh
-./scripts/run.sh
+./wardmap doctor
+./wardmap build
+./wardmap infra
+./wardmap up
+./wardmap restart api replay-worker
+./wardmap shell api
+./wardmap test
 ```
 
-Stop the Compose services with:
+Use `app` for any Flask command that does not have a short alias, and `compose`
+as an escape hatch for any Docker Compose operation:
 
 ```bash
-./scripts/services-down.sh
+./wardmap app routes
+./wardmap compose top
+./wardmap run flask --app dota2wardmap:create_app routes
 ```
 
-`IMAGE_NAME=my-image ./scripts/build.sh` overrides the default image name.
-Arguments passed to `run.sh` replace the image's default Gunicorn command; for
-example, `./scripts/run.sh flask --app dota2wardmap:create_app routes`.
+Database operations are grouped under `db`:
+
+```bash
+./wardmap db current
+./wardmap migrate
+./wardmap db shell
+./wardmap db dump backups/wardmap.dump
+./wardmap db restore backups/wardmap.dump
+```
+
+Restore stops the API and workers while replacing the database, then starts
+them again. It requires confirmation unless `--yes` is supplied. Backups use
+PostgreSQL's portable custom format.
+
+For laptop access to PostgreSQL and Redis on the home server, run
+`./wardmap tunnel`. Override the destination with `WARDMAP_SSH_HOST` or pass an
+SSH host as the first argument. The default local forwarded ports are `15432`
+and `16379`.
+
+After pushing production changes to GitHub, update both repositories and stacks
+on the home server with:
+
+```bash
+./wardmap deploy
+```
+
+This invokes `/home/artemrupasov/update-wardmap` remotely. It does not replace
+the local development commands or deploy uncommitted files.
+
+The tracked implementation lives at `ops/update-wardmap`. Install it on the
+server once as a stable command:
+
+```bash
+ln -sfn \
+  /home/artemrupasov/projects/d2wm/dota2wardmap-back/ops/update-wardmap \
+  /home/artemrupasov/update-wardmap
+```
+
+It updates both applications by default. On the server, either side can also be
+updated independently:
+
+```bash
+/home/artemrupasov/update-wardmap backend
+/home/artemrupasov/update-wardmap frontend
+```
 
 ## External dependencies
 
@@ -201,7 +233,7 @@ To discover new matches and retry failed unparsed jobs for any league without
 deleting successfully parsed data, run:
 
 ```bash
-./scripts/refresh-league.sh 19719
+./wardmap refresh-league 19719
 ```
 
 Jobs already being processed are left untouched.
@@ -224,10 +256,9 @@ under `dota2wardmap/migrations` define how existing databases reach it. Apply
 pending migrations before starting the application:
 
 ```bash
-flask --app dota2wardmap:create_app db upgrade
-flask --app dota2wardmap:create_app backfill-match-teams
-flask --app dota2wardmap:create_app refresh-teams
-flask --app dota2wardmap:create_app run
+./wardmap migrate
+./wardmap backfill-match-teams
+./wardmap refresh-teams
 ```
 
 The backfill command enriches previously parsed matches with Radiant/Dire team

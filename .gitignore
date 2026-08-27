@@ -1,4 +1,6 @@
 .env
+.env.remote
+backups/
 .venv/
 venv/
 __pycache__/

@@ -1,0 +1,304 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly PROJECT_ROOT
+readonly ENV_FILE="$PROJECT_ROOT/.env"
+
+cd "$PROJECT_ROOT"
+
+usage() {
+    cat <<'EOF'
+Wardmap backend console
+
+Usage: ./wardmap <command> [arguments]
+
+Setup and diagnostics:
+  init                         Create .env from .env-example
+  doctor                       Check required tools and Compose configuration
+  config                       Render the resolved Compose configuration
+
+Service lifecycle:
+  build [SERVICE...]           Build application images
+  up [SERVICE...]              Build and start the stack, or selected services
+  infra                        Start only PostgreSQL and Redis
+  down                         Stop and remove containers (data is retained)
+  restart [SERVICE...]         Restart the stack, or selected services
+  status                       Show all Compose containers
+  logs [SERVICE...]            Follow logs (all services by default)
+  health                       Check local API liveness and readiness
+
+Application commands:
+  app <FLASK_ARGS...>          Run any Flask command in the API container
+  keys <ARGS...>               Create, list, or revoke API keys
+  refresh-league <ID>          Discover/retry matches for a league
+  reparse-leagues <ARGS...>    Requeue parsed league matches
+  backfill-match-teams [ARGS]  Backfill match team metadata
+  backfill-player-sides [ARGS] Backfill participant sides
+  refresh-teams [ARGS...]      Refresh stale team metadata
+  migrate [ARGS...]            Run Flask-Migrate (default: upgrade)
+
+Database and cache:
+  db shell                     Open psql
+  db dump [FILE]               Write a PostgreSQL custom-format backup
+  db restore <FILE> [--yes]    Replace the database from a dump
+  db current|history|upgrade   Run the corresponding migration command
+  redis                        Open redis-cli
+
+Development and escape hatches:
+  test [PYTEST_ARGS...]        Run the local pytest suite
+  shell [SERVICE]              Open a shell (default: api)
+  exec <SERVICE> <COMMAND...>  Run a command in an existing container
+  run <COMMAND...>             Run a command in a fresh API container
+  compose <ARGS...>            Pass arguments directly to Docker Compose
+  tunnel [SSH_HOST]            Forward server PostgreSQL and Redis locally
+  deploy [SSH_HOST]            Update frontend and backend on production
+  help                         Show this help
+
+Examples:
+  ./wardmap init
+  ./wardmap up
+  ./wardmap logs api replay-worker
+  ./wardmap refresh-league 20026
+  ./wardmap keys create --owner operations --access admin
+  ./wardmap db dump backups/wardmap.dump
+  ./wardmap app routes
+EOF
+}
+
+fail() {
+    echo "wardmap: $*" >&2
+    exit 1
+}
+
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
+}
+
+require_env() {
+    [[ -f "$ENV_FILE" ]] || fail ".env does not exist; run './wardmap init' first"
+}
+
+compose() {
+    require_command docker
+    docker compose "$@"
+}
+
+flask() {
+    require_env
+    local tty_args=()
+    local running_services
+    if [[ ! -t 0 || ! -t 1 ]]; then
+        tty_args=(-T)
+    fi
+    running_services="$(compose ps --services --status running)"
+    if [[ $'\n'"$running_services"$'\n' == *$'\napi\n'* ]]; then
+        compose exec "${tty_args[@]}" api flask --app dota2wardmap:create_app "$@"
+    else
+        compose run --rm "${tty_args[@]}" api flask --app dota2wardmap:create_app "$@"
+    fi
+}
+
+env_value() {
+    local name="$1"
+    local fallback="$2"
+    local value
+    value="$(sed -n "s/^${name}=//p" "$ENV_FILE" | tail -n 1)"
+    printf '%s' "${value:-$fallback}"
+}
+
+confirm() {
+    local prompt="$1"
+    local answer
+    read -r -p "$prompt [y/N] " answer
+    [[ "$answer" == "y" || "$answer" == "Y" ]]
+}
+
+command_name="${1:-help}"
+if [[ $# -gt 0 ]]; then
+    shift
+fi
+
+case "$command_name" in
+    help|-h|--help)
+        usage
+        ;;
+    init)
+        if [[ -e "$ENV_FILE" ]]; then
+            echo ".env already exists; left unchanged."
+        else
+            cp .env-example "$ENV_FILE"
+            echo "Created .env. Review passwords, CORS_ORIGINS, and OPENDOTA_API_KEY before deployment."
+        fi
+        ;;
+    doctor)
+        require_command docker
+        require_command curl
+        require_command ssh
+        docker compose version >/dev/null
+        require_env
+        compose config --quiet
+        echo "Docker, Compose, curl, SSH, .env, and compose.yaml are ready."
+        ;;
+    config)
+        require_env
+        compose config "$@"
+        ;;
+    build)
+        require_env
+        compose build "$@"
+        ;;
+    up)
+        require_env
+        compose up --detach --build --wait "$@"
+        ;;
+    infra)
+        require_env
+        compose up --detach --wait postgres redis
+        ;;
+    down)
+        require_env
+        compose down "$@"
+        ;;
+    restart)
+        require_env
+        compose restart "$@"
+        ;;
+    status|ps)
+        require_env
+        compose ps --all "$@"
+        ;;
+    logs)
+        require_env
+        compose logs --follow --tail "${WARDMAP_LOG_TAIL:-200}" "$@"
+        ;;
+    health)
+        require_env
+        require_command curl
+        api_port="$(env_value API_PORT 5000)"
+        curl --fail --show-error --silent "http://127.0.0.1:${api_port}/health/live"
+        echo
+        curl --fail --show-error --silent "http://127.0.0.1:${api_port}/health/ready"
+        echo
+        ;;
+    app|flask)
+        [[ $# -gt 0 ]] || fail "usage: ./wardmap app <FLASK_ARGS...>"
+        flask "$@"
+        ;;
+    keys)
+        flask keys "$@"
+        ;;
+    refresh-league|reparse-leagues|backfill-match-teams|backfill-player-sides|refresh-teams)
+        flask "$command_name" "$@"
+        ;;
+    migrate)
+        if [[ $# -eq 0 ]]; then
+            set -- upgrade
+        fi
+        flask db "$@"
+        ;;
+    db)
+        require_env
+        db_command="${1:-}"
+        [[ -n "$db_command" ]] || fail "usage: ./wardmap db shell|dump|restore|current|history|upgrade"
+        shift
+        case "$db_command" in
+            shell)
+                db_user="$(env_value POSTGRES_USER dota2wardmap)"
+                db_name="$(env_value POSTGRES_DB dota2wardmap)"
+                compose exec postgres psql --username "$db_user" --dbname "$db_name" "$@"
+                ;;
+            dump)
+                output_file="${1:-backups/wardmap-$(date -u +%Y%m%dT%H%M%SZ).dump}"
+                mkdir -p "$(dirname -- "$output_file")"
+                db_user="$(env_value POSTGRES_USER dota2wardmap)"
+                db_name="$(env_value POSTGRES_DB dota2wardmap)"
+                compose exec -T postgres pg_dump --format=custom --no-owner --no-acl \
+                    --username "$db_user" --dbname "$db_name" >"$output_file"
+                echo "Database backup written to $output_file"
+                ;;
+            restore)
+                input_file="${1:-}"
+                [[ -n "$input_file" ]] || fail "usage: ./wardmap db restore <FILE> [--yes]"
+                [[ -f "$input_file" ]] || fail "backup not found: $input_file"
+                assume_yes="${2:-}"
+                if [[ "$assume_yes" != "--yes" ]]; then
+                    confirm "This replaces the current database. Continue?" || fail "restore cancelled"
+                fi
+                db_user="$(env_value POSTGRES_USER dota2wardmap)"
+                db_name="$(env_value POSTGRES_DB dota2wardmap)"
+                compose stop api match-collector replay-worker
+                compose exec -T postgres pg_restore --clean --if-exists --no-owner --no-acl \
+                    --username "$db_user" --dbname "$db_name" <"$input_file"
+                compose up --detach --wait api match-collector replay-worker
+                echo "Database restored from $input_file"
+                ;;
+            current|history|heads|branches|upgrade|downgrade|stamp)
+                flask db "$db_command" "$@"
+                ;;
+            *)
+                fail "unknown database command: $db_command"
+                ;;
+        esac
+        ;;
+    redis)
+        require_env
+        compose exec redis redis-cli "$@"
+        ;;
+    test)
+        if [[ -x .venv/bin/python ]]; then
+            .venv/bin/python -m pytest "$@"
+        else
+            require_command python3
+            python3 -m pytest "$@"
+        fi
+        ;;
+    shell)
+        require_env
+        service="${1:-api}"
+        compose exec "$service" /bin/sh
+        ;;
+    exec)
+        require_env
+        [[ $# -ge 2 ]] || fail "usage: ./wardmap exec <SERVICE> <COMMAND...>"
+        compose exec "$@"
+        ;;
+    run)
+        require_env
+        [[ $# -gt 0 ]] || fail "usage: ./wardmap run <COMMAND...>"
+        compose run --rm api "$@"
+        ;;
+    compose)
+        require_env
+        [[ $# -gt 0 ]] || fail "usage: ./wardmap compose <ARGS...>"
+        compose "$@"
+        ;;
+    tunnel)
+        require_command ssh
+        ssh_host="${1:-${WARDMAP_SSH_HOST:-artemrupasov@100.68.5.52}}"
+        exec ssh \
+            -o ExitOnForwardFailure=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=3 \
+            -N \
+            -L "${WARDMAP_POSTGRES_TUNNEL_PORT:-15432}:127.0.0.1:5432" \
+            -L "${WARDMAP_REDIS_TUNNEL_PORT:-16379}:127.0.0.1:6379" \
+            "$ssh_host"
+        ;;
+    deploy)
+        require_command ssh
+        ssh_host="${1:-${WARDMAP_SSH_HOST:-artemrupasov@100.68.5.52}}"
+        exec ssh \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=3 \
+            "$ssh_host" \
+            /home/artemrupasov/update-wardmap
+        ;;
+    *)
+        echo "wardmap: unknown command: $command_name" >&2
+        echo >&2
+        usage >&2
+        exit 2
+        ;;
+esac
