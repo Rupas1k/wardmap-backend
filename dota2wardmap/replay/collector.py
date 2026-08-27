@@ -5,11 +5,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
+from ..domain import JobStatus
 from ..extensions import db
 from ..integrations import opendota
 from ..job_maintenance import cleanup_terminal_jobs
 from ..lifecycle import install_shutdown_handlers
-from ..domain import JobStatus
 from ..models import League, Match, ReplayJob
 from ..settings import get_settings
 from ..team_metadata import refresh_stale_team_metadata

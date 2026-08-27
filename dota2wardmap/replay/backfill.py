@@ -54,7 +54,7 @@ def backfill_match_player_sides(
                     )
                     .values(is_radiant=is_radiant)
                 )
-                changed += result.rowcount
+                changed += getattr(result, "rowcount", 0)
 
             db.session.commit()
             updated_matches += 1

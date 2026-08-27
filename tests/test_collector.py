@@ -1,7 +1,7 @@
 from flask import Flask
 
-from dota2wardmap.extensions import db
 from dota2wardmap.domain import JobStatus
+from dota2wardmap.extensions import db
 from dota2wardmap.models import League, Match, ReplayJob
 from dota2wardmap.replay import collector
 

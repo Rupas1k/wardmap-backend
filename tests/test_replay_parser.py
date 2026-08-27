@@ -115,6 +115,11 @@ def test_persist_parsed_replay_persists_opendota_participants():
         "vec_z": 0,
         "radiant_networth": 1000,
         "dire_networth": 900,
+        "enemy_hero_vision_seconds": 12.5,
+        "unique_enemy_hero_vision_seconds": 10.0,
+        "heroes_spotted": 2,
+        "hero_reveal_events": 3,
+        "unique_hero_reveal_events": 2,
     }
 
     with app.app_context():
@@ -131,6 +136,7 @@ def test_persist_parsed_replay_persists_opendota_participants():
         assert match is not None and player in match.players
         assert league is not None and match in league.matches
         assert ward.player_placed_id == account_id
+        assert ward.enemy_hero_vision_seconds == 12.5
         assert radiant_team is not None and radiant_team.name == "Radiant Team"
         assert radiant_team.metadata_updated_at is not None
         assert match.radiant_team_id == 10 and match.dire_team_id == 20
