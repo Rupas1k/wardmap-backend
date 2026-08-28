@@ -1,7 +1,7 @@
 from typing import Any
 
 from flask import Blueprint, request
-from sqlalchemy import case, exists, select
+from sqlalchemy import case, exists, func, select
 from sqlalchemy.orm import aliased
 from werkzeug.exceptions import BadRequest
 
@@ -212,6 +212,13 @@ def query_wards():
         Ward.duration >= ranges[2][1],
         Ward.duration <= ranges[2][2],
     )
+    count_only = filters.get("count_only", False)
+    if not isinstance(count_only, bool):
+        raise BadRequest("count_only must be a boolean")
+    if count_only:
+        count_query = select(func.count()).select_from(query.order_by(None).subquery())
+        return {"count": db.session.execute(count_query).scalar_one()}
+
     try:
         page_size = integer_filter(filters, "page_size", 2000)
         cursor = filters.get("cursor")

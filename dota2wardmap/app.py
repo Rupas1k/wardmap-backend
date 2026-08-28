@@ -1,4 +1,5 @@
 from flask import Flask
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .access import register_access
 from .extensions import db, migrate, redis_store
@@ -10,6 +11,9 @@ from .web import register_http_handlers
 def create_app() -> Flask:
     configure_logging()
     app = Flask(__name__)
+    settings = get_settings()
+    if settings.trusted_proxy_hops:
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=settings.trusted_proxy_hops)
     configure_connections(app)
     register_extensions(app)
     register_access(app)

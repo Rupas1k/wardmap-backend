@@ -37,6 +37,7 @@ class Settings:
     anonymous_max_ward_page_size: int
     advanced_max_ward_page_size: int
     admin_max_ward_page_size: int
+    trusted_proxy_hops: int
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -76,6 +77,7 @@ class Settings:
             anonymous_max_ward_page_size=_integer("ANONYMOUS_MAX_WARD_PAGE_SIZE", 5000, minimum=1),
             advanced_max_ward_page_size=_integer("ADVANCED_MAX_WARD_PAGE_SIZE", 5000, minimum=1),
             admin_max_ward_page_size=_integer("ADMIN_MAX_WARD_PAGE_SIZE", 10000, minimum=1),
+            trusted_proxy_hops=_integer("TRUSTED_PROXY_HOPS", 0),
         )
 
 

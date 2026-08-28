@@ -69,8 +69,19 @@ def test_query_wards_applies_dataset_filters():
                     "maximum_ward_lifetime": 400,
                 },
             )
+            count_response = client.post(
+                "/wards/query",
+                json={
+                    "league_ids": [42],
+                    "team_ids": [10],
+                    "ward_type": "observer",
+                    "count_only": True,
+                },
+            )
 
     assert response.status_code == 200
+    assert count_response.status_code == 200
+    assert count_response.get_json() == {"count": 1}
     assert response.get_json() == {
         "data": [
             {
@@ -130,6 +141,18 @@ def test_query_wards_rejects_non_numeric_ids():
 
     with app.test_client() as client:
         response = client.post("/wards/query", json={"player_ids": ["player name"]})
+
+    assert response.status_code == 400
+
+
+def test_query_wards_rejects_non_boolean_count_only():
+    app = Flask(__name__)
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
+    db.init_app(app)
+    app.register_blueprint(bp)
+
+    with app.test_client() as client:
+        response = client.post("/wards/query", json={"count_only": "yes"})
 
     assert response.status_code == 400
 

@@ -64,6 +64,7 @@ password, add `OPENDOTA_API_KEY` when available, and set the production origin:
 
 ```dotenv
 CORS_ORIGINS=https://wardmap.rupasov.dev
+TRUSTED_PROXY_HOPS=1
 ```
 
 `.env`, Cloudflare credentials, GitHub tokens, SSH keys, API keys, and database
