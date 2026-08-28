@@ -5,9 +5,11 @@ use std::rc::Rc;
 use source2_demo::prelude::*;
 use source2_demo::proto::DotaCombatlogTypes;
 
+mod grid;
+use grid::VisionGrid;
+
 use crate::observers::game_time::GameTime;
 use crate::observers::players::Players;
-use crate::vision_grid::VisionGrid;
 use crate::VisionSample;
 
 const RADIANT: i32 = 2;
@@ -166,21 +168,34 @@ impl Vision {
             return true;
         };
 
-        if try_property!(game_rules, bool, "m_pGameRules.m_bIsTemporaryDay") == Some(true) {
-            return true;
-        }
-        if try_property!(game_rules, bool, "m_pGameRules.m_bIsTemporaryNight") == Some(true)
-            || try_property!(game_rules, bool, "m_pGameRules.m_bIsNightstalkerNight") == Some(true)
+        if game_rules
+            .get_property("m_pGameRules.m_bIsTemporaryDay")
+            .is_ok_and(|x| x.bool())
         {
-            return false;
-        }
-
-        let Some(net_time) = try_property!(game_rules, i32, "m_pGameRules.m_iNetTimeOfDay") else {
             return true;
         };
+
+        if game_rules
+            .get_property("m_pGameRules.m_bIsTemporaryNight")
+            .is_ok_and(|x| x.bool())
+        {
+            return false;
+        };
+
+        if game_rules
+            .get_property("m_pGameRules.m_bIsNightstalkerNight")
+            .is_ok_and(|x| x.bool())
+        {
+            return false;
+        };
+
+        let Ok(FieldValue::Signed32(net_time)) = game_rules.get_property("m_pGameRules.m_iNetTimeOfDay") else {
+            return false;
+        };
+
         let daytime_start = try_property!(game_rules, f32, "m_pGameRules.m_flDaytimeStart").unwrap_or(0.25);
         let nighttime_start = try_property!(game_rules, f32, "m_pGameRules.m_flNighttimeStart").unwrap_or(0.75);
-        let time_of_day = net_time as f32 / u16::MAX as f32;
+        let time_of_day = *net_time as f32 / u16::MAX as f32;
 
         time_of_day >= daytime_start && time_of_day < nighttime_start
     }
@@ -213,6 +228,7 @@ impl Vision {
         let Ok(tick) = self.game_time.borrow().tick(ctx) else {
             return Ok(());
         };
+
         let Ok(start_time) = self.game_time.borrow().start_time() else {
             return Ok(());
         };
@@ -233,6 +249,7 @@ impl Vision {
         if event != DotaCombatlogTypes::DotaCombatlogModifierAdd && event != DotaCombatlogTypes::DotaCombatlogModifierRemove {
             return Ok(());
         }
+
         if combat_log.inflictor_name().ok() != Some("modifier_smoke_of_deceit") {
             return Ok(());
         }
@@ -240,9 +257,11 @@ impl Vision {
         let Ok(target_name) = combat_log.target_name() else {
             return Ok(());
         };
+
         let Some(player) = self.players.borrow().hero_to_player.get(target_name).cloned() else {
             return Ok(());
         };
+
         let player_id = player.borrow().id;
 
         if event == DotaCombatlogTypes::DotaCombatlogModifierAdd {

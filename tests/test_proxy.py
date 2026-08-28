@@ -31,10 +31,28 @@ def test_untrusted_forwarded_client_ip_is_ignored(monkeypatch):
     assert client_ip(0, monkeypatch) == "127.0.0.1"
 
 
-def test_cors_exposes_rate_limit_retry_header():
+def test_cors_allows_configured_origin_and_exposes_retry_header(monkeypatch):
+    monkeypatch.setenv("CORS_ORIGINS", "https://wardmap.rupasov.dev")
+    get_settings.cache_clear()
     app = create_app()
 
     with app.test_client() as client:
-        response = client.get("/health/live", headers={"Origin": "http://localhost:5173"})
+        response = client.get(
+            "/health/live", headers={"Origin": "https://wardmap.rupasov.dev"}
+        )
 
+    assert response.headers["Access-Control-Allow-Origin"] == "https://wardmap.rupasov.dev"
     assert response.headers["Access-Control-Expose-Headers"] == "Retry-After"
+
+
+def test_cors_rejects_unconfigured_origin(monkeypatch):
+    monkeypatch.setenv("CORS_ORIGINS", "https://wardmap.rupasov.dev")
+    get_settings.cache_clear()
+    app = create_app()
+
+    with app.test_client() as client:
+        response = client.get(
+            "/health/live", headers={"Origin": "https://untrusted.example"}
+        )
+
+    assert "Access-Control-Allow-Origin" not in response.headers

@@ -1,7 +1,6 @@
 mod observers;
 mod output;
 mod replay;
-mod vision_grid;
 
 pub mod utils;
 

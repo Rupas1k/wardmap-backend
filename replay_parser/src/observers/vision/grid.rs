@@ -5,7 +5,7 @@ const EXPORTED_WORLD_MIN: f32 = -8923.0;
 const GRID_WORLD_ORIGIN: f32 = NETWORK_COORDINATE_BIAS + EXPORTED_WORLD_MIN;
 const WORLD_Z_ORIGIN: f32 = NETWORK_COORDINATE_BIAS;
 
-const MAP_DATA: &[u8] = include_bytes!("../assets/elevations/2.bin");
+const MAP_DATA: &[u8] = include_bytes!("../../../assets/elevations/2.bin");
 
 pub struct VisionGrid {
     rows: usize,
