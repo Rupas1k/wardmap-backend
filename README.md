@@ -2,8 +2,8 @@
 
 Backend services for [Wardmap](https://wardmap.rupasov.dev): a Flask API,
 PostgreSQL-backed replay queue, OpenDota collector, native replay parser, and
-background workers. Browser-side analysis and visualization live in the
-private `Rupas1k/wardmap-stage` repository.
+background workers. Browser-side analysis and visualization live in
+[`Rupas1k/wardmap`](https://github.com/Rupas1k/wardmap).
 
 ## Quick start
 
@@ -11,7 +11,7 @@ Requirements: Docker with Compose, Git, curl, SSH, and a POSIX shell. Clone the
 repository, create the local environment, and start the complete stack:
 
 ```bash
-git clone https://github.com/Rupas1k/wardmap-backend.git dota2wardmap-back
+git clone https://github.com/Rupas1k/dota2wardmap-back.git
 cd dota2wardmap-back
 
 ./wardmap init

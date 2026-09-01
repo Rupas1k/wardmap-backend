@@ -8,8 +8,8 @@ provides private SSH administration.
 
 ```text
 /home/artemrupasov/projects/d2wm/
-├── dota2wardmap-back/  # Rupas1k/wardmap-backend
-└── wardmap-stage/      # Rupas1k/wardmap-stage
+├── dota2wardmap-back/  # backend
+└── wardmap/            # frontend
 ```
 
 | Component | Local binding | Public endpoint |
@@ -43,13 +43,12 @@ mkdir -p /home/artemrupasov/projects/d2wm
 cd /home/artemrupasov/projects/d2wm
 
 git clone \
-  https://github.com/Rupas1k/wardmap-backend.git \
-  dota2wardmap-back
+  https://github.com/Rupas1k/dota2wardmap-back.git
 
 git clone \
-  https://github.com/Rupas1k/wardmap-stage.git
+  https://github.com/Rupas1k/wardmap.git
 
-git -C wardmap-stage lfs pull
+git -C wardmap lfs pull
 ```
 
 Create the backend environment:
@@ -63,7 +62,7 @@ Review `.env` before starting production. At minimum, use a strong PostgreSQL
 password, add `OPENDOTA_API_KEY` when available, and set the production origin:
 
 ```dotenv
-CORS_ORIGINS=https://wardmap.rupasov.dev
+CORS_ORIGINS=https://rupas1k.github.io,https://wardmap.rupasov.dev
 TRUSTED_PROXY_HOPS=1
 ```
 
@@ -172,7 +171,7 @@ docker compose \
   ps --all
 
 docker compose \
-  --project-directory /home/artemrupasov/projects/d2wm/wardmap-stage \
+  --project-directory /home/artemrupasov/projects/d2wm/wardmap \
   ps --all
 ```
 

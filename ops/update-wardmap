@@ -5,7 +5,7 @@ set -euo pipefail
 readonly DEPLOY_USER="${WARDMAP_DEPLOY_USER:-artemrupasov}"
 readonly DEPLOY_HOME="${WARDMAP_DEPLOY_HOME:-/home/$DEPLOY_USER}"
 readonly BACKEND_DIR="$DEPLOY_HOME/projects/d2wm/dota2wardmap-back"
-readonly FRONTEND_DIR="$DEPLOY_HOME/projects/d2wm/wardmap-stage"
+readonly FRONTEND_DIR="$DEPLOY_HOME/projects/d2wm/wardmap"
 readonly TARGET="${1:-all}"
 
 usage() {

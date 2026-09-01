@@ -4,13 +4,11 @@ This guide configures a new machine for both repositories:
 
 ```text
 ~/projects/d2wm/
-├── dota2wardmap-back/  # Rupas1k/wardmap-backend
-└── wardmap-stage/      # production frontend repository
+├── dota2wardmap-back/  # backend
+└── wardmap/            # frontend
 ```
 
-The directory name `dota2wardmap-back` is retained because the production
-updater currently expects it. `wardmap-stage` is the main frontend repository;
-it is not a separate staging environment.
+The production updater expects these directory names.
 
 ## Prerequisites
 
@@ -44,14 +42,13 @@ mkdir -p ~/projects/d2wm
 cd ~/projects/d2wm
 
 git clone \
-  https://github.com/Rupas1k/wardmap-backend.git \
-  dota2wardmap-back
+  https://github.com/Rupas1k/dota2wardmap-back.git
 
 git clone \
-  https://github.com/Rupas1k/wardmap-stage.git
+  https://github.com/Rupas1k/wardmap.git
 ```
 
-Both repositories are private, so `gh auth login` must be completed first.
+The backend is private, so `gh auth login` must be completed first.
 
 ## Backend
 
@@ -105,7 +102,7 @@ working Rust toolchain and native build tools are available first.
 Fetch the Git LFS map assets and install the locked npm dependencies:
 
 ```bash
-cd ~/projects/d2wm/wardmap-stage
+cd ~/projects/d2wm/wardmap
 
 git lfs pull
 rustup target add wasm32-unknown-unknown
@@ -153,7 +150,7 @@ git pull
 Start the frontend from another terminal:
 
 ```bash
-cd ~/projects/d2wm/wardmap-stage
+cd ~/projects/d2wm/wardmap
 git pull
 npm ci
 npm run dev
