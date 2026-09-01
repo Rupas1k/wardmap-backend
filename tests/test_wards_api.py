@@ -1,8 +1,9 @@
+import pytest
 from flask import Flask, g
 
 from dota2wardmap.api.players import bp as players_bp
 from dota2wardmap.api.teams import bp as teams_bp
-from dota2wardmap.api.wards import bp
+from dota2wardmap.api.wards import MAX_FILTER_IDS, bp
 from dota2wardmap.extensions import db
 from dota2wardmap.models import League, Match, Player, Team, Ward
 
@@ -145,6 +146,32 @@ def test_query_wards_rejects_non_numeric_ids():
     assert response.status_code == 400
 
 
+def test_query_wards_rejects_non_array_ids():
+    app = Flask(__name__)
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
+    db.init_app(app)
+    app.register_blueprint(bp)
+
+    with app.test_client() as client:
+        response = client.post("/wards/query", json={"player_ids": "123"})
+
+    assert response.status_code == 400
+
+
+def test_query_wards_rejects_too_many_ids():
+    app = Flask(__name__)
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
+    db.init_app(app)
+    app.register_blueprint(bp)
+
+    with app.test_client() as client:
+        response = client.post(
+            "/wards/query", json={"player_ids": list(range(MAX_FILTER_IDS + 1))}
+        )
+
+    assert response.status_code == 400
+
+
 def test_query_wards_rejects_non_boolean_count_only():
     app = Flask(__name__)
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
@@ -153,6 +180,31 @@ def test_query_wards_rejects_non_boolean_count_only():
 
     with app.test_client() as client:
         response = client.post("/wards/query", json={"count_only": "yes"})
+
+    assert response.status_code == 400
+
+
+def test_query_wards_rejects_unscoped_count():
+    app = Flask(__name__)
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
+    db.init_app(app)
+    app.register_blueprint(bp)
+
+    with app.test_client() as client:
+        response = client.post("/wards/query", json={"count_only": True})
+
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_query_wards_rejects_non_finite_numbers(value):
+    app = Flask(__name__)
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
+    db.init_app(app)
+    app.register_blueprint(bp)
+
+    with app.test_client() as client:
+        response = client.post("/wards/query", json={"minimum_game_minute": value})
 
     assert response.status_code == 400
 

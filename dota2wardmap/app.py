@@ -38,6 +38,7 @@ def configure_connections(app: Flask) -> None:
     settings = get_settings()
     app.config["SQLALCHEMY_DATABASE_URI"] = settings.database_url
     app.config["REDIS_URL"] = settings.redis_url
+    app.config["MAX_CONTENT_LENGTH"] = settings.max_request_body_bytes
 
 
 def register_extensions(app: Flask) -> None:

@@ -1,3 +1,4 @@
+import math
 from typing import Any
 
 from flask import Blueprint, request
@@ -10,6 +11,7 @@ from ..extensions import db
 from ..models import Match, Player, Team, Ward, players_matches
 
 bp = Blueprint("wards", __name__)
+MAX_FILTER_IDS = 500
 
 
 def unit_display_name(unit_name: str | None) -> str | None:
@@ -47,6 +49,10 @@ def ward_response(row: Any) -> dict[str, Any]:
 def integer_list(filters: Any, name: str) -> list[int]:
     try:
         values = filters.getlist(name) if hasattr(filters, "getlist") else filters.get(name, [])
+        if isinstance(values, (str, bytes)) or not isinstance(values, (list, tuple)):
+            raise BadRequest(f"{name} must be an array of numeric IDs")
+        if len(values) > MAX_FILTER_IDS:
+            raise BadRequest(f"{name} cannot contain more than {MAX_FILTER_IDS} IDs")
         return [int(value) for value in values]
     except (TypeError, ValueError) as exc:
         raise BadRequest(f"{name} must contain numeric IDs") from exc
@@ -61,9 +67,12 @@ def integer_filter(filters: dict[str, Any], name: str, default: int) -> int:
 
 def number_filter(filters: dict[str, Any], name: str, default: float) -> float:
     try:
-        return float(filters.get(name, default))
+        value = float(filters.get(name, default))
     except (TypeError, ValueError) as exc:
         raise BadRequest(f"{name} must be a number") from exc
+    if not math.isfinite(value):
+        raise BadRequest(f"{name} must be a finite number")
+    return value
 
 
 @bp.post("/wards/query")
@@ -216,6 +225,17 @@ def query_wards():
     if not isinstance(count_only, bool):
         raise BadRequest("count_only must be a boolean")
     if count_only:
+        scoped_ids = (
+            league_ids,
+            match_ids,
+            player_ids,
+            opponent_player_ids,
+            destroyed_by_player_ids,
+            team_ids,
+            opponent_team_ids,
+        )
+        if not any(scoped_ids):
+            raise BadRequest("count_only queries must include at least one ID filter")
         count_query = select(func.count()).select_from(query.order_by(None).subquery())
         return {"count": db.session.execute(count_query).scalar_one()}
 

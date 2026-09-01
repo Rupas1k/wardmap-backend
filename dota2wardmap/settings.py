@@ -32,12 +32,14 @@ class Settings:
     job_retention_days: int
     job_cleanup_interval_seconds: int
     anonymous_rate_limit: int
+    authentication_failure_rate_limit: int
     advanced_rate_limit: int
     admin_rate_limit: int
     anonymous_max_ward_page_size: int
     advanced_max_ward_page_size: int
     admin_max_ward_page_size: int
     trusted_proxy_hops: int
+    max_request_body_bytes: int
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -72,12 +74,16 @@ class Settings:
             job_retention_days=_integer("JOB_RETENTION_DAYS", 7, minimum=1),
             job_cleanup_interval_seconds=_integer("JOB_CLEANUP_INTERVAL_SECONDS", 3600, minimum=60),
             anonymous_rate_limit=_integer("ANONYMOUS_RATE_LIMIT_PER_MINUTE", 60),
+            authentication_failure_rate_limit=_integer(
+                "AUTHENTICATION_FAILURE_RATE_LIMIT_PER_MINUTE", 30, minimum=1
+            ),
             advanced_rate_limit=_integer("ADVANCED_RATE_LIMIT_PER_MINUTE", 600),
             admin_rate_limit=_integer("ADMIN_RATE_LIMIT_PER_MINUTE", 0),
             anonymous_max_ward_page_size=_integer("ANONYMOUS_MAX_WARD_PAGE_SIZE", 5000, minimum=1),
             advanced_max_ward_page_size=_integer("ADVANCED_MAX_WARD_PAGE_SIZE", 5000, minimum=1),
             admin_max_ward_page_size=_integer("ADMIN_MAX_WARD_PAGE_SIZE", 10000, minimum=1),
             trusted_proxy_hops=_integer("TRUSTED_PROXY_HOPS", 0),
+            max_request_body_bytes=_integer("MAX_REQUEST_BODY_BYTES", 65_536, minimum=1),
         )
 
 
