@@ -9,7 +9,6 @@ const MAX_INTERVAL_SECONDS: f64 = SAMPLE_INTERVAL_TICKS as f64 / 30.0 + 1e-6;
 pub struct WardVisionMetrics {
     pub enemy_hero_seconds: f64,
     pub unique_enemy_hero_seconds: f64,
-    pub ward_only_enemy_hero_seconds: f64,
     pub heroes_spotted: u8,
     pub hero_reveal_events: u16,
     pub unique_hero_reveal_events: u16,
@@ -128,7 +127,6 @@ impl VisionMetrics {
             let metrics = &mut self.wards.entry(*handle).or_default().metrics;
             metrics.enemy_hero_seconds += elapsed;
             if !sight.non_ward {
-                metrics.ward_only_enemy_hero_seconds += elapsed;
                 metrics.scouting_tracking_seconds += elapsed / sight.wards.len() as f64;
                 if sight.wards.len() == 1 {
                     metrics.unique_enemy_hero_seconds += elapsed;

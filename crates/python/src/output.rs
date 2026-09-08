@@ -69,23 +69,6 @@ pub struct Output {
     pub scouting_complete: Option<bool>,
 }
 
-#[pyclass(get_all, skip_from_py_object)]
-#[derive(Clone)]
-pub struct VisionSample {
-    pub time: i32,
-    pub game_time_seconds: f64,
-    pub target_player_steam_id: u64,
-    pub target_is_radiant: bool,
-    pub observing_is_radiant: bool,
-    pub is_alive: bool,
-    pub visible_by_enemy: bool,
-    pub provider_count: u16,
-    pub provider_kinds: Vec<String>,
-    pub ward_provider_handles: Vec<u32>,
-    pub has_non_ward_provider: bool,
-    pub visibility_known: bool,
-}
-
 impl From<wardmap_parser::Output> for Output {
     fn from(value: wardmap_parser::Output) -> Self {
         Self {
@@ -159,25 +142,6 @@ impl From<wardmap_parser::ReplayPlayer> for ReplayPlayer {
             hero_name: value.hero_name,
             team: value.team,
             is_fake_client: value.is_fake_client,
-        }
-    }
-}
-
-impl From<wardmap_parser::VisionSample> for VisionSample {
-    fn from(value: wardmap_parser::VisionSample) -> Self {
-        Self {
-            time: value.time,
-            game_time_seconds: value.game_time_seconds,
-            target_player_steam_id: value.target_player_steam_id,
-            target_is_radiant: value.target_is_radiant,
-            observing_is_radiant: value.observing_is_radiant,
-            is_alive: value.is_alive,
-            visible_by_enemy: value.visible_by_enemy,
-            provider_count: value.provider_count,
-            provider_kinds: value.provider_kinds,
-            ward_provider_handles: value.ward_provider_handles,
-            has_non_ward_provider: value.has_non_ward_provider,
-            visibility_known: value.visibility_known,
         }
     }
 }

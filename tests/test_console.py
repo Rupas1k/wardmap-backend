@@ -3,7 +3,6 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CONSOLE = PROJECT_ROOT / "wardmap"
-UPDATER = PROJECT_ROOT / "ops" / "update-wardmap"
 
 
 def run_console(*arguments: str) -> subprocess.CompletedProcess[str]:
@@ -31,16 +30,3 @@ def test_unknown_command_is_rejected_with_help():
     assert result.returncode == 2
     assert "unknown command: not-a-command" in result.stderr
     assert "Usage: ./wardmap <command>" in result.stderr
-
-
-def test_production_updater_help_is_available_without_server_tools():
-    result = subprocess.run(
-        [str(UPDATER), "--help"],
-        cwd="/tmp",
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 0
-    assert "update-wardmap [all|backend|frontend]" in result.stdout

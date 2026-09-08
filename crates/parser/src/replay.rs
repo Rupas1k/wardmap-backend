@@ -10,7 +10,7 @@ use crate::observers::game_time::*;
 use crate::observers::players::*;
 use crate::observers::vision::*;
 use crate::observers::wards::*;
-use crate::output::{Output, Replay, ReplayMetadata, ReplayPlayer, VisionSample};
+use crate::output::{Output, Replay, ReplayMetadata, ReplayPlayer};
 
 #[derive(Debug, Copy, Clone)]
 struct WardEntry {
@@ -272,21 +272,4 @@ fn replay_metadata(info: &source2_demo::proto::CDemoFileInfo, ctx: &Context) -> 
         end_time: game.and_then(|game| game.end_time),
         players,
     }
-}
-
-pub fn parse_vision(data: &[u8]) -> anyhow::Result<Vec<VisionSample>> {
-    let mut parser = Parser::new(data)?;
-
-    let game_time = parser.register_observer::<GameTime>();
-    let players = parser.register_observer::<Players>();
-    let vision = parser.register_observer::<Vision>();
-
-    vision.borrow_mut().set_dependencies(game_time, players);
-    vision.borrow_mut().enable_samples();
-
-    parser.run_to_end()?;
-
-    let samples = vision.borrow().samples.clone();
-
-    Ok(samples)
 }

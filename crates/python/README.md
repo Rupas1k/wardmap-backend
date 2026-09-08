@@ -8,7 +8,7 @@ From the backend root:
 python -m pip install -e ./crates/python
 ```
 
-The Python API remains `d2wm_parser.parse_replay` and `d2wm_parser.parse_vision`.
+The Python API is `d2wm_parser.parse_replay`.
 
 ## License
 

@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use source2_demo::prelude::*;
@@ -13,8 +13,6 @@ pub use metrics::{WardVisionMetrics, DISCOVERY_TAU_SECONDS, SCOUTING_VERSION};
 
 use crate::observers::game_time::GameTime;
 use crate::observers::players::Players;
-use crate::VisionSample;
-
 const RADIANT: i32 = 2;
 const DIRE: i32 = 3;
 const WATCHER_VISION_RANGE: i32 = 800;
@@ -32,18 +30,12 @@ pub struct Vision {
     active_observers: HashSet<u32>,
     incomplete_wards: HashSet<u32>,
     smoked_heroes: HashSet<u64>,
-    collect_samples: bool,
-    pub samples: Vec<VisionSample>,
 }
 
 impl Vision {
     pub fn set_dependencies(&mut self, game_time: Rc<RefCell<GameTime>>, players: Rc<RefCell<Players>>) {
         self.game_time = game_time;
         self.players = players;
-    }
-
-    pub fn enable_samples(&mut self) {
-        self.collect_samples = true;
     }
 
     pub fn ward_metrics(&self, handle: u32) -> WardVisionMetrics {
@@ -54,7 +46,7 @@ impl Vision {
         !self.incomplete_wards.contains(&handle)
     }
 
-    fn sample(&mut self, ctx: &Context, tick: i32, start_time: Option<f32>) {
+    fn sample(&mut self, ctx: &Context, tick: i32) {
         let is_day = self.is_day(ctx);
         let providers_known = self.provider_handles.iter().all(|handle| {
             ctx.entities().get_by_handle(*handle as usize).is_ok_and(|entity| {
@@ -81,7 +73,6 @@ impl Vision {
             .copied()
             .collect::<HashSet<_>>();
         let players = self.players.borrow();
-        let game_time_seconds = start_time.map(|start| tick as f64 / 30.0 - start as f64);
         let mut observations = Vec::with_capacity(players.players.len());
 
         for player in &players.players {
@@ -94,8 +85,6 @@ impl Vision {
             let is_alive = is_alive(hero);
             let position = entity_position(hero);
             let enemy_team = if player.team == RADIANT { DIRE } else { RADIANT };
-            let mut provider_kinds = BTreeSet::new();
-            let mut provider_count = 0_u16;
             let mut ward_providers = Vec::new();
             let mut has_non_ward_provider = false;
 
@@ -103,10 +92,7 @@ impl Vision {
                 if let Some(target_position) = position {
                     for provider in providers.iter().filter(|provider| provider.team == enemy_team) {
                         if self.grid.can_see(provider.position, target_position, provider.range) {
-                            provider_count = provider_count.saturating_add(1);
-                            provider_kinds.insert(provider.kind.to_string());
-
-                            if provider.kind == "observer_ward" {
+                            if provider.is_observer {
                                 ward_providers.push(provider.handle);
                             } else {
                                 has_non_ward_provider = true;
@@ -130,23 +116,6 @@ impl Vision {
                 })
             };
             observations.push((player.id, observation));
-
-            if let Some(game_time_seconds) = game_time_seconds.filter(|_| self.collect_samples) {
-                self.samples.push(VisionSample {
-                    time: game_time_seconds as i32,
-                    game_time_seconds,
-                    target_player_steam_id: player.id,
-                    target_is_radiant: player.team == RADIANT,
-                    observing_is_radiant: enemy_team == RADIANT,
-                    is_alive,
-                    visible_by_enemy: provider_count > 0,
-                    provider_count,
-                    provider_kinds: provider_kinds.into_iter().collect(),
-                    ward_provider_handles: ward_providers,
-                    has_non_ward_provider,
-                    visibility_known,
-                });
-            }
         }
         let has_gap = self
             .previous_sample_tick
@@ -229,15 +198,13 @@ impl Vision {
             return Ok(());
         };
 
-        let start_time = self.game_time.borrow().start_time().ok();
-
         if !self.providers_changed && self.next_sample_tick.is_some_and(|next| tick < next) {
             return Ok(());
         }
 
         self.next_sample_tick = Some(tick + SAMPLE_INTERVAL_TICKS);
         self.providers_changed = false;
-        self.sample(ctx, tick, start_time);
+        self.sample(ctx, tick);
 
         Ok(())
     }
@@ -280,16 +247,16 @@ impl Vision {
     }
 }
 
-struct ActiveProvider<'a> {
+struct ActiveProvider {
     handle: u32,
     team: i32,
     range: i32,
     position: [f32; 3],
-    kind: &'a str,
+    is_observer: bool,
 }
 
-impl<'a> ActiveProvider<'a> {
-    fn from_entity(entity: &'a Entity, is_day: bool) -> Option<Self> {
+impl ActiveProvider {
+    fn from_entity(entity: &Entity, is_day: bool) -> Option<Self> {
         if !is_alive(entity) {
             return None;
         }
@@ -317,7 +284,7 @@ impl<'a> ActiveProvider<'a> {
             team,
             range,
             position: entity_position(entity)?,
-            kind: provider_kind(class_name),
+            is_observer: class_name == "CDOTA_NPC_Observer_Ward",
         })
     }
 }
@@ -356,36 +323,4 @@ fn entity_position(entity: &Entity) -> Option<[f32; 3]> {
         cell_y as f32 * 128.0 + offset_y,
         cell_z as f32 * 128.0 + offset_z,
     ])
-}
-
-fn provider_kind(class_name: &str) -> &'static str {
-    if class_name.starts_with("CDOTA_Unit_Hero_") {
-        "hero"
-    } else if matches!(class_name, "CDOTA_BaseNPC_Creep_Lane" | "CDOTA_BaseNPC_Creep_Siege") {
-        "lane_creep"
-    } else if class_name == "CDOTA_BaseNPC_Creep_Neutral" {
-        "controlled_neutral"
-    } else if class_name == "CDOTA_NPC_Observer_Ward" {
-        "observer_ward"
-    } else if class_name == "CDOTA_BaseNPC_Tower" {
-        "tower"
-    } else if class_name == "CDOTA_BaseNPC_Watch_Tower" {
-        "watcher"
-    } else if class_name == "CDOTA_Unit_Courier" {
-        "courier"
-    } else if class_name == "CDOTA_Unit_Roshans_Banner" {
-        "roshan_banner"
-    } else if matches!(
-        class_name,
-        "CDOTA_BaseNPC_Barracks"
-            | "CDOTA_BaseNPC_Effigy_Statue"
-            | "CDOTA_BaseNPC_Filler"
-            | "CDOTA_BaseNPC_Fort"
-            | "CDOTA_NPC_BaseBlocker"
-            | "CDOTA_Unit_Fountain"
-    ) {
-        "building"
-    } else {
-        "controlled_unit"
-    }
 }

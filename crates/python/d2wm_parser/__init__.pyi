@@ -28,22 +28,7 @@ class Output:
     scouting_tau_seconds: float | None
     scouting_complete: bool | None
 
-class VisionSample:
-    time: int
-    game_time_seconds: float
-    target_player_steam_id: int
-    target_is_radiant: bool
-    observing_is_radiant: bool
-    is_alive: bool
-    visible_by_enemy: bool
-    provider_count: int
-    provider_kinds: list[str]
-    ward_provider_handles: list[int]
-    has_non_ward_provider: bool
-    visibility_known: bool
-
 def parse_replay(data: bytes) -> Replay: ...
-def parse_vision(data: bytes) -> list[VisionSample]: ...
 
 class Replay:
     metadata: ReplayMetadata

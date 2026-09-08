@@ -3,7 +3,7 @@ mod output;
 use pyo3::prelude::*;
 use std::any::Any;
 
-pub use output::{Output, Replay, ReplayMetadata, ReplayPlayer, VisionSample};
+pub use output::{Output, Replay, ReplayMetadata, ReplayPlayer};
 
 #[global_allocator]
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -11,12 +11,6 @@ static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 #[pyfunction]
 pub fn parse_replay(data: &[u8]) -> PyResult<Replay> {
     catch_parser_error("replay", || wardmap_parser::parse_replay(data)).map(Replay::from)
-}
-
-#[pyfunction]
-pub fn parse_vision(data: &[u8]) -> PyResult<Vec<VisionSample>> {
-    catch_parser_error("vision", || wardmap_parser::parse_vision(data))
-        .map(|rows| rows.into_iter().map(VisionSample::from).collect())
 }
 
 fn catch_parser_error<T>(operation: &str, parse: impl FnOnce() -> anyhow::Result<T> + std::panic::UnwindSafe) -> PyResult<T> {
@@ -51,7 +45,5 @@ fn d2wm_parser(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<ReplayMetadata>()?;
     module.add_class::<ReplayPlayer>()?;
     module.add_class::<Output>()?;
-    module.add_class::<VisionSample>()?;
-    module.add_function(wrap_pyfunction!(parse_replay, module)?)?;
-    module.add_function(wrap_pyfunction!(parse_vision, module)?)
+    module.add_function(wrap_pyfunction!(parse_replay, module)?)
 }
