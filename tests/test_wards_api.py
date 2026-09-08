@@ -105,6 +105,12 @@ def test_query_wards_applies_dataset_filters():
                 "heroes_spotted": None,
                 "hero_reveal_events": None,
                 "unique_hero_reveal_events": None,
+                "scouting_tracking_seconds": None,
+                "scouting_discovery_seconds": None,
+                "scouting_score": None,
+                "scouting_version": None,
+                "scouting_tau_seconds": None,
+                "scouting_complete": None,
                 "match_duration": 2400,
                 "team_id": 10,
                 "team_name": "Radiant Team",
@@ -129,9 +135,7 @@ def test_query_wards_applies_dataset_filters():
     with app.test_client() as client:
         players_response = client.get("/players?league_ids=42")
     assert players_response.status_code == 200
-    assert players_response.get_json() == {
-        "data": [{"id": 7, "name": "Support", "ward_count": 1}]
-    }
+    assert players_response.get_json() == {"data": [{"id": 7, "name": "Support", "ward_count": 1}]}
 
 
 def test_query_wards_rejects_non_numeric_ids():
@@ -165,9 +169,7 @@ def test_query_wards_rejects_too_many_ids():
     app.register_blueprint(bp)
 
     with app.test_client() as client:
-        response = client.post(
-            "/wards/query", json={"player_ids": list(range(MAX_FILTER_IDS + 1))}
-        )
+        response = client.post("/wards/query", json={"player_ids": list(range(MAX_FILTER_IDS + 1))})
 
     assert response.status_code == 400
 

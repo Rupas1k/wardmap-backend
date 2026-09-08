@@ -18,7 +18,7 @@ def download_and_parse_replay(match_id: int, result_queue: Queue) -> None:
     replay, match_data = data
     try:
         started_at = time.time()
-        output = parse_replay(replay)
+        output = parse_replay(replay).wards
         output_dicts = [
             {
                 "time_placed": item.time_placed,
@@ -43,6 +43,12 @@ def download_and_parse_replay(match_id: int, result_queue: Queue) -> None:
                 "heroes_spotted": item.heroes_spotted,
                 "hero_reveal_events": item.hero_reveal_events,
                 "unique_hero_reveal_events": item.unique_hero_reveal_events,
+                "scouting_tracking_seconds": item.scouting_tracking_seconds,
+                "scouting_discovery_seconds": item.scouting_discovery_seconds,
+                "scouting_score": item.scouting_score,
+                "scouting_version": item.scouting_version,
+                "scouting_tau_seconds": item.scouting_tau_seconds,
+                "scouting_complete": item.scouting_complete,
             }
             for item in output
         ]

@@ -48,6 +48,12 @@ def persist_parsed_replay(result: ParsedReplay) -> bool:
                     "heroes_spotted": ward_data["heroes_spotted"],
                     "hero_reveal_events": ward_data["hero_reveal_events"],
                     "unique_hero_reveal_events": ward_data["unique_hero_reveal_events"],
+                    "scouting_tracking_seconds": ward_data.get("scouting_tracking_seconds"),
+                    "scouting_discovery_seconds": ward_data.get("scouting_discovery_seconds"),
+                    "scouting_score": ward_data.get("scouting_score"),
+                    "scouting_version": ward_data.get("scouting_version"),
+                    "scouting_tau_seconds": ward_data.get("scouting_tau_seconds"),
+                    "scouting_complete": ward_data.get("scouting_complete"),
                     "npc_killed": ward_data["npc_killed"],
                 }
             )

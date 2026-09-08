@@ -13,6 +13,16 @@ from ..models import Match, Player, Team, Ward, players_matches
 bp = Blueprint("wards", __name__)
 MAX_FILTER_IDS = 500
 
+ID_FILTER_NAMES = (
+    "league_ids",
+    "match_ids",
+    "player_ids",
+    "opponent_player_ids",
+    "destroyed_by_player_ids",
+    "team_ids",
+    "opponent_team_ids",
+)
+
 
 def unit_display_name(unit_name: str | None) -> str | None:
     if not unit_name:
@@ -70,19 +80,18 @@ def number_filter(filters: dict[str, Any], name: str, default: float) -> float:
         value = float(filters.get(name, default))
     except (TypeError, ValueError) as exc:
         raise BadRequest(f"{name} must be a number") from exc
+
     if not math.isfinite(value):
         raise BadRequest(f"{name} must be a finite number")
+
     return value
 
 
-@bp.post("/wards/query")
-def query_wards():
-    filters = request.get_json(silent=True) or {}
-    if not isinstance(filters, dict):
-        raise BadRequest("request body must be a JSON object")
+def ward_query():
     owner_team = aliased(Team)
     opponent_team = aliased(Team)
     destroying_player = aliased(Player)
+
     owner_team_id = case(
         (Ward.is_radiant.is_(True), Match.radiant_team_id),
         (Ward.is_radiant.is_(False), Match.dire_team_id),
@@ -96,6 +105,7 @@ def query_wards():
         (Ward.is_radiant.is_(True), Match.radiant_win),
         (Ward.is_radiant.is_(False), ~Match.radiant_win),
     )
+
     query = (
         select(
             Ward.id,
@@ -120,6 +130,12 @@ def query_wards():
             Ward.heroes_spotted,
             Ward.hero_reveal_events,
             Ward.unique_hero_reveal_events,
+            Ward.scouting_tracking_seconds,
+            Ward.scouting_discovery_seconds,
+            Ward.scouting_score,
+            Ward.scouting_version,
+            Ward.scouting_tau_seconds,
+            Ward.scouting_complete,
             Match.duration.label("match_duration"),
             owner_team_id.label("team_id"),
             owner_team.name.label("team_name"),
@@ -135,22 +151,23 @@ def query_wards():
         .outerjoin(opponent_team, opponent_team.id == opponent_team_id)
     )
 
-    league_ids = integer_list(filters, "league_ids")
-    match_ids = integer_list(filters, "match_ids")
-    player_ids = integer_list(filters, "player_ids")
-    opponent_player_ids = integer_list(filters, "opponent_player_ids")
-    destroyed_by_player_ids = integer_list(filters, "destroyed_by_player_ids")
-    team_ids = integer_list(filters, "team_ids")
-    opponent_team_ids = integer_list(filters, "opponent_team_ids")
-    if league_ids:
-        query = query.where(Match.league_id.in_(league_ids))
-    if match_ids:
-        query = query.where(Ward.match_id.in_(match_ids))
-    if player_ids:
-        query = query.where(Ward.player_placed_id.in_(player_ids))
-    if destroyed_by_player_ids:
-        query = query.where(Ward.player_destroyed_id.in_(destroyed_by_player_ids))
-    if opponent_player_ids:
+    return query, owner_team_id, opponent_team_id, team_won
+
+
+def id_filters(filters: dict[str, Any]) -> dict[str, list[int]]:
+    return {name: integer_list(filters, name) for name in ID_FILTER_NAMES}
+
+
+def apply_id_filters(query, ids, owner_team_id, opponent_team_id):
+    if ids["league_ids"]:
+        query = query.where(Match.league_id.in_(ids["league_ids"]))
+    if ids["match_ids"]:
+        query = query.where(Ward.match_id.in_(ids["match_ids"]))
+    if ids["player_ids"]:
+        query = query.where(Ward.player_placed_id.in_(ids["player_ids"]))
+    if ids["destroyed_by_player_ids"]:
+        query = query.where(Ward.player_destroyed_id.in_(ids["destroyed_by_player_ids"]))
+    if ids["opponent_player_ids"]:
         opponent_players = players_matches.alias("opponent_players")
         query = query.where(
             Ward.is_radiant.is_not(None),
@@ -159,15 +176,19 @@ def query_wards():
                     opponent_players.c.match_id == Ward.match_id,
                     opponent_players.c.is_radiant.is_not(None),
                     opponent_players.c.is_radiant != Ward.is_radiant,
-                    opponent_players.c.player_id.in_(opponent_player_ids),
+                    opponent_players.c.player_id.in_(ids["opponent_player_ids"]),
                 )
             ),
         )
-    if team_ids:
-        query = query.where(owner_team_id.in_(team_ids))
-    if opponent_team_ids:
-        query = query.where(opponent_team_id.in_(opponent_team_ids))
+    if ids["team_ids"]:
+        query = query.where(owner_team_id.in_(ids["team_ids"]))
+    if ids["opponent_team_ids"]:
+        query = query.where(opponent_team_id.in_(ids["opponent_team_ids"]))
 
+    return query
+
+
+def apply_category_filters(query, filters: dict[str, Any], team_won):
     team_result = filters.get("team_result", "all")
     if team_result not in ("all", "won", "lost"):
         raise BadRequest("team_result must be all, won, or lost")
@@ -192,6 +213,10 @@ def query_wards():
     if outcome in ("destroyed", "survived"):
         query = query.where(Ward.is_destroyed.is_(outcome == "destroyed"))
 
+    return query
+
+
+def apply_range_filters(query, filters: dict[str, Any]):
     ranges = (
         (
             "game minute",
@@ -209,11 +234,13 @@ def query_wards():
             integer_filter(filters, "maximum_ward_lifetime", 600),
         ),
     )
+
     for name, minimum, maximum in ranges:
         minimum_allowed = -1.5 if name == "game minute" else 0
         if minimum < minimum_allowed or maximum < minimum:
             raise BadRequest(f"invalid {name} range")
-    query = query.where(
+
+    return query.where(
         Ward.time_placed >= ranges[0][1] * 60,
         Ward.time_placed <= ranges[0][2] * 60,
         Match.duration >= ranges[1][1] * 60,
@@ -221,32 +248,34 @@ def query_wards():
         Ward.duration >= ranges[2][1],
         Ward.duration <= ranges[2][2],
     )
+
+
+def count_response(query, filters: dict[str, Any], ids: dict[str, list[int]]) -> dict[str, int] | None:
     count_only = filters.get("count_only", False)
     if not isinstance(count_only, bool):
         raise BadRequest("count_only must be a boolean")
-    if count_only:
-        scoped_ids = (
-            league_ids,
-            match_ids,
-            player_ids,
-            opponent_player_ids,
-            destroyed_by_player_ids,
-            team_ids,
-            opponent_team_ids,
-        )
-        if not any(scoped_ids):
-            raise BadRequest("count_only queries must include at least one ID filter")
-        count_query = select(func.count()).select_from(query.order_by(None).subquery())
-        return {"count": db.session.execute(count_query).scalar_one()}
+    if not count_only:
+        return None
 
+    if not any(ids.values()):
+        raise BadRequest("count_only queries must include at least one ID filter")
+
+    count_query = select(func.count()).select_from(query.order_by(None).subquery())
+
+    return {"count": db.session.execute(count_query).scalar_one()}
+
+
+def paginated_response(query, filters: dict[str, Any]) -> dict[str, Any]:
     try:
         page_size = integer_filter(filters, "page_size", 2000)
-        cursor = filters.get("cursor")
-        cursor = int(cursor) if cursor is not None else None
+        cursor_value = filters.get("cursor")
+        cursor = int(cursor_value) if cursor_value is not None else None
     except (TypeError, ValueError) as exc:
         raise BadRequest("page_size and cursor must be integers") from exc
+
     if page_size < 1:
         raise BadRequest("page_size must be greater than zero")
+
     page_size = min(page_size, max_ward_page_size())
     if cursor is not None:
         query = query.where(Ward.id < cursor)
@@ -254,6 +283,7 @@ def query_wards():
     rows = db.session.execute(query.order_by(Ward.id.desc()).limit(page_size + 1)).all()
     has_more = len(rows) > page_size
     rows = rows[:page_size]
+
     return {
         "data": [ward_response(row) for row in rows],
         "pagination": {
@@ -262,3 +292,22 @@ def query_wards():
             "next_cursor": rows[-1].id if has_more and rows else None,
         },
     }
+
+
+@bp.post("/wards/query")
+def query_wards():
+    filters = request.get_json(silent=True) or {}
+    if not isinstance(filters, dict):
+        raise BadRequest("request body must be a JSON object")
+
+    query, owner_team_id, opponent_team_id, team_won = ward_query()
+    ids = id_filters(filters)
+
+    query = apply_id_filters(query, ids, owner_team_id, opponent_team_id)
+    query = apply_category_filters(query, filters, team_won)
+    query = apply_range_filters(query, filters)
+
+    if response := count_response(query, filters, ids):
+        return response
+
+    return paginated_response(query, filters)

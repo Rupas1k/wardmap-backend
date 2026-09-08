@@ -120,6 +120,12 @@ def test_persist_parsed_replay_persists_opendota_participants():
         "heroes_spotted": 2,
         "hero_reveal_events": 3,
         "unique_hero_reveal_events": 2,
+        "scouting_tracking_seconds": 11.0,
+        "scouting_discovery_seconds": 9.5,
+        "scouting_score": 20.5,
+        "scouting_version": 1,
+        "scouting_tau_seconds": 10.0,
+        "scouting_complete": True,
     }
 
     with app.app_context():
@@ -137,6 +143,12 @@ def test_persist_parsed_replay_persists_opendota_participants():
         assert league is not None and match in league.matches
         assert ward.player_placed_id == account_id
         assert ward.enemy_hero_vision_seconds == 12.5
+        assert ward.scouting_tracking_seconds == 11.0
+        assert ward.scouting_discovery_seconds == 9.5
+        assert ward.scouting_score == 20.5
+        assert ward.scouting_version == 1
+        assert ward.scouting_tau_seconds == 10.0
+        assert ward.scouting_complete is True
         assert radiant_team is not None and radiant_team.name == "Radiant Team"
         assert radiant_team.metadata_updated_at is not None
         assert match.radiant_team_id == 10 and match.dire_team_id == 20

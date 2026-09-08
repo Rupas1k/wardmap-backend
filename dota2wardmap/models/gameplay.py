@@ -148,6 +148,12 @@ class Ward(db.Model):
     heroes_spotted: Mapped[int | None] = mapped_column(SmallInteger)
     hero_reveal_events: Mapped[int | None] = mapped_column(SmallInteger)
     unique_hero_reveal_events: Mapped[int | None] = mapped_column(SmallInteger)
+    scouting_tracking_seconds: Mapped[float | None] = mapped_column(Float)
+    scouting_discovery_seconds: Mapped[float | None] = mapped_column(Float)
+    scouting_score: Mapped[float | None] = mapped_column(Float)
+    scouting_version: Mapped[int | None] = mapped_column(SmallInteger)
+    scouting_tau_seconds: Mapped[float | None] = mapped_column(Float)
+    scouting_complete: Mapped[bool | None] = mapped_column(Boolean)
 
     npc_killed: Mapped[str | None] = mapped_column(String)
 
