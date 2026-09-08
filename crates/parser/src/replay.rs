@@ -10,7 +10,7 @@ use crate::observers::game_time::*;
 use crate::observers::players::*;
 use crate::observers::vision::*;
 use crate::observers::wards::*;
-use crate::output::{Output, VisionSample};
+use crate::output::{Output, Replay, ReplayMetadata, ReplayPlayer, VisionSample};
 
 #[derive(Debug, Copy, Clone)]
 struct WardEntry {
@@ -18,6 +18,8 @@ struct WardEntry {
     placed_tick: i32,
     is_radiant: bool,
     is_observer: bool,
+    radiant_networth: i32,
+    dire_networth: i32,
 }
 
 #[derive(Default)]
@@ -27,8 +29,9 @@ struct App {
     vision: Rc<RefCell<Vision>>,
 
     handle_to_entry: HashMap<u32, WardEntry>,
-    pending_entries: VecDeque<(Entity, i32, WardEvent)>,
+    pending_entries: VecDeque<(Entity, i32, WardEvent, bool)>,
     result: Vec<Output>,
+    result_handles: Vec<u32>,
 }
 
 #[observer]
@@ -39,7 +42,7 @@ impl App {
             return Ok(());
         };
 
-        while let Some((ward, tick, event)) = self.pending_entries.pop_front() {
+        while let Some((ward, tick, event, post_game)) = self.pending_entries.pop_front() {
             let handle = ward.handle();
             let entry = self
                 .handle_to_entry
@@ -70,7 +73,7 @@ impl App {
                 is_obs: entry.is_observer,
                 is_radiant: entry.is_radiant,
                 event: event.to_string(),
-                post_game: false,
+                post_game,
                 player_placed_steam_id: self
                     .players
                     .borrow()
@@ -87,20 +90,21 @@ impl App {
                 vec_x: property!(ward, "CBodyComponent.m_vecX"),
                 vec_y: property!(ward, "CBodyComponent.m_vecY"),
                 vec_z: property!(ward, "CBodyComponent.m_vecZ"),
-                radiant_networth: property!(
-                    ctx.entities().get_by_class_name("CDOTA_DataRadiant")?,
-                    "m_vecDataTeam.0002.m_iNetWorth"
-                ),
-                dire_networth: property!(
-                    ctx.entities().get_by_class_name("CDOTA_DataDire")?,
-                    "m_vecDataTeam.0003.m_iNetWorth"
-                ),
-                enemy_hero_vision_seconds: vision_metrics.enemy_hero_seconds,
-                unique_enemy_hero_vision_seconds: vision_metrics.unique_enemy_hero_seconds,
+                radiant_networth: entry.radiant_networth,
+                dire_networth: entry.dire_networth,
+                enemy_hero_vision_seconds: vision_metrics.enemy_hero_seconds as f32,
+                unique_enemy_hero_vision_seconds: vision_metrics.unique_enemy_hero_seconds as f32,
                 heroes_spotted: vision_metrics.heroes_spotted,
                 hero_reveal_events: vision_metrics.hero_reveal_events,
                 unique_hero_reveal_events: vision_metrics.unique_hero_reveal_events,
+                scouting_tracking_seconds: None,
+                scouting_discovery_seconds: None,
+                scouting_score: None,
+                scouting_version: None,
+                scouting_tau_seconds: None,
+                scouting_complete: None,
             });
+            self.result_handles.push(handle);
         }
 
         Ok(())
@@ -108,11 +112,18 @@ impl App {
 }
 
 impl WardsObserver for App {
-    fn on_ward(&mut self, ctx: &Context, ward_class: WardClass, event: WardEvent, ward: &Entity) -> ObserverResult {
+    fn on_ward(
+        &mut self,
+        ctx: &Context,
+        ward_class: WardClass,
+        event: WardEvent,
+        post_game: bool,
+        ward: &Entity,
+    ) -> ObserverResult {
         match event {
             WardEvent::Placed => self.track_placement(ctx, ward_class, ward)?,
-            WardEvent::Killed(killer) => self.queue_removal(ctx, ward, WardEvent::Killed(killer))?,
-            WardEvent::Expired => self.queue_removal(ctx, ward, WardEvent::Expired)?,
+            WardEvent::Killed(killer) => self.queue_removal(ctx, ward, WardEvent::Killed(killer), post_game)?,
+            WardEvent::Expired => self.queue_removal(ctx, ward, WardEvent::Expired, post_game)?,
         }
 
         Ok(())
@@ -141,6 +152,14 @@ impl App {
             .cloned()
             .ok_or_else(|| anyhow!("Player slot {player_slot} is unavailable"))?;
         let player = player.borrow();
+        let radiant_networth: i32 = property!(
+            ctx.entities().get_by_class_name("CDOTA_DataRadiant")?,
+            "m_vecDataTeam.0002.m_iNetWorth"
+        );
+        let dire_networth: i32 = property!(
+            ctx.entities().get_by_class_name("CDOTA_DataDire")?,
+            "m_vecDataTeam.0003.m_iNetWorth"
+        );
 
         self.handle_to_entry.insert(
             ward.handle(),
@@ -149,21 +168,23 @@ impl App {
                 placed_tick: self.game_time.borrow().tick(ctx)?,
                 is_radiant: player.team == 2,
                 is_observer: ward_class == WardClass::Observer,
+                radiant_networth,
+                dire_networth,
             },
         );
 
         Ok(())
     }
 
-    fn queue_removal(&mut self, ctx: &Context, ward: &Entity, event: WardEvent) -> ObserverResult {
+    fn queue_removal(&mut self, ctx: &Context, ward: &Entity, event: WardEvent, post_game: bool) -> ObserverResult {
         self.pending_entries
-            .push_back((ward.clone(), self.game_time.borrow().tick(ctx)?, event));
+            .push_back((ward.clone(), self.game_time.borrow().tick(ctx)?, event, post_game));
 
         Ok(())
     }
 }
 
-pub(crate) fn parse_replay(data: &[u8]) -> anyhow::Result<Vec<Output>> {
+pub fn parse_replay(data: &[u8]) -> anyhow::Result<Replay> {
     let mut parser = Parser::new(data)?;
 
     let game_time = parser.register_observer::<GameTime>();
@@ -182,12 +203,78 @@ pub(crate) fn parse_replay(data: &[u8]) -> anyhow::Result<Vec<Output>> {
     parser.run_to_end()?;
     app.borrow_mut().tick_end(parser.context())?;
 
-    let result = app.borrow().result.clone();
+    let app = app.borrow();
+    let vision = app.vision.borrow();
+    let mut result = app.result.clone();
+    for (output, handle) in result.iter_mut().zip(&app.result_handles) {
+        let metrics = vision.ward_metrics(*handle);
+        output.enemy_hero_vision_seconds = metrics.enemy_hero_seconds as f32;
+        output.unique_enemy_hero_vision_seconds = metrics.unique_enemy_hero_seconds as f32;
+        output.heroes_spotted = metrics.heroes_spotted;
+        output.hero_reveal_events = metrics.hero_reveal_events;
+        output.unique_hero_reveal_events = metrics.unique_hero_reveal_events;
+        if output.is_obs {
+            output.scouting_tracking_seconds = Some(metrics.scouting_tracking_seconds);
+            output.scouting_discovery_seconds = Some(metrics.scouting_discovery_seconds);
+            output.scouting_score = Some(metrics.scouting_score());
+            output.scouting_version = Some(SCOUTING_VERSION);
+            output.scouting_tau_seconds = Some(DISCOVERY_TAU_SECONDS);
+            output.scouting_complete = Some(vision.scouting_complete(*handle));
+        }
+    }
 
-    Ok(result)
+    Ok(Replay {
+        metadata: replay_metadata(parser.replay_info(), parser.context()),
+        wards: result,
+    })
 }
 
-pub(crate) fn parse_vision(data: &[u8]) -> anyhow::Result<Vec<VisionSample>> {
+fn replay_metadata(info: &source2_demo::proto::CDemoFileInfo, ctx: &Context) -> ReplayMetadata {
+    let game = info.game_info.as_ref().and_then(|info| info.dota.as_ref());
+    let game_duration_seconds = ctx
+        .entities()
+        .get_by_class_name("CDOTAGamerulesProxy")
+        .ok()
+        .and_then(|rules| {
+            let start: f32 = try_property!(rules, "m_pGameRules.m_flGameStartTime")?;
+            let end: f32 = try_property!(rules, "m_pGameRules.m_flGameEndTime")?;
+
+            (end >= start).then_some(end - start)
+        });
+    let players = game
+        .into_iter()
+        .flat_map(|game| &game.player_info)
+        .map(|player| ReplayPlayer {
+            steam_id: player.steamid,
+            name: player
+                .player_name
+                .as_deref()
+                .map(|name| String::from_utf8_lossy(name).trim_end_matches('\0').to_owned()),
+            hero_name: player.hero_name.clone(),
+            team: player.game_team,
+            is_fake_client: player.is_fake_client,
+        })
+        .collect();
+
+    ReplayMetadata {
+        playback_time_seconds: info.playback_time,
+        game_duration_seconds,
+        playback_ticks: info.playback_ticks,
+        playback_frames: info.playback_frames,
+        match_id: game.and_then(|game| game.match_id),
+        game_mode: game.and_then(|game| game.game_mode),
+        game_winner: game.and_then(|game| game.game_winner),
+        league_id: game.and_then(|game| game.leagueid),
+        radiant_team_id: game.and_then(|game| game.radiant_team_id),
+        dire_team_id: game.and_then(|game| game.dire_team_id),
+        radiant_team_tag: game.and_then(|game| game.radiant_team_tag.clone()),
+        dire_team_tag: game.and_then(|game| game.dire_team_tag.clone()),
+        end_time: game.and_then(|game| game.end_time),
+        players,
+    }
+}
+
+pub fn parse_vision(data: &[u8]) -> anyhow::Result<Vec<VisionSample>> {
     let mut parser = Parser::new(data)?;
 
     let game_time = parser.register_observer::<GameTime>();

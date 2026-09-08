@@ -41,14 +41,16 @@ git config --global pull.rebase true
 mkdir -p ~/projects/d2wm
 cd ~/projects/d2wm
 
-git clone \
-  https://github.com/Rupas1k/dota2wardmap-back.git
+git clone https://github.com/Rupas1k/dota2wardmap-back.git
 
 git clone \
   https://github.com/Rupas1k/wardmap.git
 ```
 
 The backend is private, so `gh auth login` must be completed first.
+
+The shared Rust parser lives in `crates/parser`. Its Python bindings live in
+`crates/python`, and the frontend consumes the parser from this repository.
 
 ## Backend
 

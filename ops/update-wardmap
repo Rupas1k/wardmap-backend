@@ -58,6 +58,8 @@ update_backend() {
 
     echo "Updating backend..."
     git -C "$BACKEND_DIR" pull --ff-only
+    git -C "$BACKEND_DIR" submodule sync --recursive
+    git -C "$BACKEND_DIR" submodule update --init --recursive
     docker compose --project-directory "$BACKEND_DIR" \
         up --detach --build --remove-orphans --wait
 }

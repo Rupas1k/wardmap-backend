@@ -18,11 +18,12 @@ RUN apt-get update \
 
 WORKDIR /build
 
-COPY replay_parser ./replay_parser
-RUN python -m pip wheel --wheel-dir /wheels ./replay_parser
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+RUN python -m pip wheel --wheel-dir /wheels ./crates/python
 
 COPY requirements.txt .
-RUN sed -e '/^-e \.\/replay_parser/d' -e '/^pytest/d' requirements.txt > requirements-container.txt \
+RUN sed -e '/^-e \.\/crates\/python/d' -e '/^pytest/d' requirements.txt > requirements-container.txt \
     && python -m pip wheel --wheel-dir /wheels --requirement requirements-container.txt
 
 

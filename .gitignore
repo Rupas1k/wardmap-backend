@@ -8,7 +8,8 @@ __pycache__/
 *.so
 .pytest_cache/
 .ruff_cache/
-replay_parser/target/
+/target/
+/crates/*/target/
 .idea
 .vscode
 dota2wardmap/.ipynb_checkpoints

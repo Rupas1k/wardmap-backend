@@ -9,7 +9,8 @@
 **/__pycache__
 **/*.py[cod]
 **/*.so
-replay_parser/target
+target
+crates/**/target
 clustering.ipynb
 tests
 .env

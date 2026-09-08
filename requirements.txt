@@ -1,4 +1,4 @@
--e ./replay_parser
+-e ./crates/python
 python-dotenv>=1,<2
 SQLAlchemy>=2,<3
 Flask>=3,<4

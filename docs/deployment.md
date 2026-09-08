@@ -42,14 +42,16 @@ credentials, and the updater owned by that user.
 mkdir -p /home/artemrupasov/projects/d2wm
 cd /home/artemrupasov/projects/d2wm
 
-git clone \
-  https://github.com/Rupas1k/dota2wardmap-back.git
+git clone https://github.com/Rupas1k/dota2wardmap-back.git
 
 git clone \
   https://github.com/Rupas1k/wardmap.git
 
 git -C wardmap lfs pull
 ```
+
+The shared Rust parser and its Python bindings are included in the backend
+repository.
 
 Create the backend environment:
 

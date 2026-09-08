@@ -1,6 +1,5 @@
 const GRID_SIZE: f32 = 64.0;
 const NETWORK_COORDINATE_BIAS: f32 = 128.0 * 128.0;
-// dota2wardmap-export samples cell [0, 0] at (-8923, -8923).
 const EXPORTED_WORLD_MIN: f32 = -8923.0;
 const GRID_WORLD_ORIGIN: f32 = NETWORK_COORDINATE_BIAS + EXPORTED_WORLD_MIN;
 const WORLD_Z_ORIGIN: f32 = NETWORK_COORDINATE_BIAS;
@@ -18,8 +17,10 @@ impl Default for VisionGrid {
         let rows = u16::from_be_bytes([MAP_DATA[0], MAP_DATA[1]]) as usize;
         let columns = u16::from_be_bytes([MAP_DATA[2], MAP_DATA[3]]) as usize;
         let cells = MAP_DATA[4..]
-            .chunks_exact(2)
-            .map(|bytes| i16::from_be_bytes([bytes[0], bytes[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|bytes| i16::from_be_bytes(*bytes))
             .collect::<Vec<_>>();
 
         debug_assert_eq!(cells.len(), rows * columns);
@@ -29,6 +30,15 @@ impl Default for VisionGrid {
 }
 
 impl VisionGrid {
+    pub fn contains(&self, position: [f32; 3]) -> bool {
+        if !position.iter().all(|coordinate| coordinate.is_finite()) {
+            return false;
+        }
+        let column = ((position[0] - GRID_WORLD_ORIGIN) / GRID_SIZE).round() as i32;
+        let row = ((position[1] - GRID_WORLD_ORIGIN) / GRID_SIZE).round() as i32;
+        self.cell(column, row).is_some()
+    }
+
     pub fn can_see(&self, source: [f32; 3], target: [f32; 3], radius: i32) -> bool {
         if radius <= 0 {
             return false;

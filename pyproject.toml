@@ -12,5 +12,5 @@ testpaths = ["tests"]
 venvPath = "."
 venv = ".venv"
 typeCheckingMode = "basic"
-include = ["dota2wardmap", "replay_parser"]
+include = ["dota2wardmap", "crates/python"]
 exclude = ["dota2wardmap/migrations", "tests"]

@@ -2,19 +2,16 @@
 name = "d2wm_parser"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/Rupas1k/dota2wardmap-back"
+publish = false
 
 [lib]
 crate-type = ["cdylib"]
 name = "d2wm_parser"
 
 [dependencies]
-source2-demo = { version = "0.5", features = ["dota"] }
-hashbrown = "0.17"
+mimalloc = "0.1"
+wardmap-parser = { path = "../parser" }
 anyhow = "1.0"
 pyo3 = { version = "0.29", features = ["extension-module"] }
-
-[profile.release]
-lto = "fat"
-codegen-units = 1
-opt-level = 3
-strip = "symbols"
