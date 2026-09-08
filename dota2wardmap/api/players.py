@@ -14,27 +14,16 @@ def list_players():
     team_ids = integer_list(request.args, "team_ids")
     role = request.args.get("role", "participant")
 
-    query = (
-        _ward_placers_query(league_ids, team_ids)
-        if role == "placer"
-        else _participants_query(league_ids, team_ids)
-    )
+    query = _ward_placers_query(league_ids, team_ids) if role == "placer" else _participants_query(league_ids, team_ids)
 
     search = request.args.get("q", "").strip()
     if search:
         pattern = f"%{search}%"
         query = query.where(or_(Player.name.ilike(pattern), Player.id.cast(String).ilike(pattern)))
 
-    players = db.session.execute(
-        query.order_by(query.selected_columns.ward_count.desc(), Player.name, Player.id)
-    ).all()
+    players = db.session.execute(query.order_by(query.selected_columns.ward_count.desc(), Player.name, Player.id)).all()
 
-    return {
-        "data": [
-            {"id": player.id, "name": player.name, "ward_count": player.ward_count}
-            for player in players
-        ]
-    }
+    return {"data": [{"id": player.id, "name": player.name, "ward_count": player.ward_count} for player in players]}
 
 
 def _ward_placers_query(league_ids: list[int], team_ids: list[int]):

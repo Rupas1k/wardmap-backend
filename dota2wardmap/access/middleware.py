@@ -48,10 +48,7 @@ def enforce_auth_failure_limit() -> None:
         return
 
     raw_count = redis_store.get(_auth_failure_key())
-    if (
-        raw_count is not None
-        and int(raw_count) >= get_settings().authentication_failure_rate_limit
-    ):
+    if raw_count is not None and int(raw_count) >= get_settings().authentication_failure_rate_limit:
         raise TooManyRequests("Too many failed authentication attempts", retry_after=60)
 
 

@@ -33,9 +33,7 @@ def sync_league(league_id: int, *, refresh_unparsed_jobs: bool = False) -> tuple
     match_records = opendota.get_league_matches(league_id)
     match_ids = {match["match_id"] for match in match_records if match.get("match_id") is not None}
     parsed_ids = set(db.session.execute(select(Match.id).where(Match.id.in_(match_ids))).scalars().all())
-    existing_jobs = db.session.execute(
-        select(ReplayJob).where(ReplayJob.match_id.in_(match_ids))
-    ).scalars().all()
+    existing_jobs = db.session.execute(select(ReplayJob).where(ReplayJob.match_id.in_(match_ids))).scalars().all()
     existing_job_ids = {job.match_id for job in existing_jobs}
     queued_ids = match_ids - parsed_ids - existing_job_ids
     refreshed_ids: set[int] = set()

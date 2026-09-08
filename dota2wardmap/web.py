@@ -40,9 +40,7 @@ def register_http_handlers(app: Flask) -> None:
     def handle_unexpected_error(error: Exception) -> tuple[dict[str, Any], int]:
         app.logger.exception("Unhandled request error", exc_info=error)
         db.session.rollback()
-        return {
-            "error": {"code": "internal_server_error", "message": "An unexpected error occurred"}
-        }, 500
+        return {"error": {"code": "internal_server_error", "message": "An unexpected error occurred"}}, 500
 
     @app.after_request
     def add_cors_headers(response: Response) -> Response:

@@ -37,9 +37,7 @@ def test_cors_allows_configured_origin_and_exposes_retry_header(monkeypatch):
     app = create_app()
 
     with app.test_client() as client:
-        response = client.get(
-            "/health/live", headers={"Origin": "https://wardmap.rupasov.dev"}
-        )
+        response = client.get("/health/live", headers={"Origin": "https://wardmap.rupasov.dev"})
 
     assert response.headers["Access-Control-Allow-Origin"] == "https://wardmap.rupasov.dev"
     assert response.headers["Access-Control-Expose-Headers"] == "Retry-After"
@@ -51,8 +49,6 @@ def test_cors_rejects_unconfigured_origin(monkeypatch):
     app = create_app()
 
     with app.test_client() as client:
-        response = client.get(
-            "/health/live", headers={"Origin": "https://untrusted.example"}
-        )
+        response = client.get("/health/live", headers={"Origin": "https://untrusted.example"})
 
     assert "Access-Control-Allow-Origin" not in response.headers

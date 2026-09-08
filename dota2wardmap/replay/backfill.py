@@ -40,8 +40,7 @@ def backfill_match_player_sides(
             sides = {
                 int(player["account_id"]): side
                 for player in record.get("players", [])
-                if player.get("account_id") is not None
-                and (side := _player_side(player)) is not None
+                if player.get("account_id") is not None and (side := _player_side(player)) is not None
             }
 
             changed = 0
