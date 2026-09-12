@@ -87,6 +87,13 @@ def number_filter(filters: dict[str, Any], name: str, default: float) -> float:
     return value
 
 
+def optional_number_filter(filters: dict[str, Any], name: str) -> float | None:
+    if filters.get(name) is None:
+        return None
+
+    return number_filter(filters, name, 0)
+
+
 def ward_query():
     owner_team = aliased(Team)
     opponent_team = aliased(Team)
@@ -250,6 +257,45 @@ def apply_range_filters(query, filters: dict[str, Any]):
     )
 
 
+def apply_vision_filters(query, filters: dict[str, Any]):
+    ranges = (
+        ("scouting score", Ward.scouting_score, "scouting_score"),
+        ("enemy hero vision", Ward.enemy_hero_vision_seconds, "enemy_hero_vision_seconds"),
+        (
+            "unique enemy hero vision",
+            Ward.unique_enemy_hero_vision_seconds,
+            "unique_enemy_hero_vision_seconds",
+        ),
+        ("heroes spotted", Ward.heroes_spotted, "heroes_spotted"),
+        ("hero reveal events", Ward.hero_reveal_events, "hero_reveal_events"),
+        (
+            "unique hero reveal events",
+            Ward.unique_hero_reveal_events,
+            "unique_hero_reveal_events",
+        ),
+        ("scouting tracking", Ward.scouting_tracking_seconds, "scouting_tracking_seconds"),
+        ("scouting discovery", Ward.scouting_discovery_seconds, "scouting_discovery_seconds"),
+    )
+
+    for label, column, field in ranges:
+        minimum = optional_number_filter(filters, f"minimum_{field}")
+        maximum = optional_number_filter(filters, f"maximum_{field}")
+
+        if minimum is not None and minimum < 0:
+            raise BadRequest(f"minimum {label} must be zero or greater")
+        if maximum is not None and maximum < 0:
+            raise BadRequest(f"maximum {label} must be zero or greater")
+        if minimum is not None and maximum is not None and maximum < minimum:
+            raise BadRequest(f"invalid {label} range")
+
+        if minimum is not None:
+            query = query.where(column >= minimum)
+        if maximum is not None:
+            query = query.where(column <= maximum)
+
+    return query
+
+
 def count_response(query, filters: dict[str, Any], ids: dict[str, list[int]]) -> dict[str, int] | None:
     count_only = filters.get("count_only", False)
     if not isinstance(count_only, bool):
@@ -306,6 +352,7 @@ def query_wards():
     query = apply_id_filters(query, ids, owner_team_id, opponent_team_id)
     query = apply_category_filters(query, filters, team_won)
     query = apply_range_filters(query, filters)
+    query = apply_vision_filters(query, filters)
 
     if response := count_response(query, filters, ids):
         return response
