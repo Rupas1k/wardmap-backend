@@ -50,5 +50,6 @@ def register_http_handlers(app: Flask) -> None:
             response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
             response.headers["Access-Control-Expose-Headers"] = "Retry-After"
+            response.headers["Cache-Control"] = "no-store"
             response.headers["Vary"] = "Origin"
         return response
