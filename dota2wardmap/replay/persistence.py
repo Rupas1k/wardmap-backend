@@ -18,8 +18,10 @@ def persist_parsed_replay(result: ParsedReplay) -> bool:
     match_id, match_data, ward_results = result
     try:
         wards = []
-        for ward_data in ward_results:
-            if ward_data["event"] == "expired" or "guys" in ward_data["npc_killed"]:
+        for raw_ward_data in ward_results:
+            ward_data = raw_ward_data.copy()
+            npc_killed = ward_data.get("npc_killed")
+            if ward_data["event"] == "expired" or (npc_killed is not None and "guys" in npc_killed):
                 ward_data["player_destroyed_steam_id"] = None
 
             ward_data["player_placed_steam_id"] -= 76561197960265728
@@ -54,6 +56,7 @@ def persist_parsed_replay(result: ParsedReplay) -> bool:
                     "scouting_version": ward_data.get("scouting_version"),
                     "scouting_tau_seconds": ward_data.get("scouting_tau_seconds"),
                     "scouting_complete": ward_data.get("scouting_complete"),
+                    "measurement": ward_data.get("measurement"),
                     "npc_killed": ward_data["npc_killed"],
                 }
             )
@@ -84,7 +87,8 @@ def persist_parsed_replay(result: ParsedReplay) -> bool:
             else:
                 logger.warning("Parsed match %s contains no wards", match_id)
         else:
-            logger.info("Match %s is already parsed", match_id)
+            updated = _update_existing_measurements(match_id, wards)
+            logger.info("Match %s is already parsed; updated %s measurements", match_id, updated)
 
         db.session.commit()
         return True
@@ -92,6 +96,38 @@ def persist_parsed_replay(result: ParsedReplay) -> bool:
         db.session.rollback()
         logger.exception("Unable to persist match %s", match_id)
         return False
+
+
+def _ward_signature(ward: Ward | dict[str, Any]) -> tuple[object, ...]:
+    names = ("is_obs", "is_radiant", "player_placed_id", "time_placed", "duration", "x_pos", "y_pos", "z_pos")
+
+    if isinstance(ward, dict):
+        return tuple(ward.get(name) for name in names)
+
+    return tuple(getattr(ward, name) for name in names)
+
+
+def _update_existing_measurements(match_id: int, parsed_wards: list[dict[str, Any]]) -> int:
+    candidates = [ward for ward in parsed_wards if ward.get("measurement") is not None]
+    if not candidates:
+        return 0
+
+    existing = db.session.execute(select(Ward).where(Ward.match_id == match_id)).scalars().all()
+    by_signature: dict[tuple[object, ...], list[Ward]] = {}
+    for ward in existing:
+        by_signature.setdefault(_ward_signature(ward), []).append(ward)
+
+    matches: list[tuple[Ward, Any]] = []
+    for candidate in candidates:
+        rows = by_signature.get(_ward_signature(candidate), [])
+        if len(rows) != 1:
+            raise ValueError(f"Measurement backfill for match {match_id} is ambiguous or incomplete")
+        matches.append((rows.pop(), candidate["measurement"]))
+
+    for ward, measurement in matches:
+        ward.measurement = measurement
+
+    return len(matches)
 
 
 def _upsert_team(team_data: dict[str, Any] | None) -> int | None:

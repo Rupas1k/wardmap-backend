@@ -67,6 +67,7 @@ pub struct Output {
     pub scouting_version: Option<i16>,
     pub scouting_tau_seconds: Option<f64>,
     pub scouting_complete: Option<bool>,
+    pub measurement_json: Option<String>,
 }
 
 impl From<wardmap_parser::Output> for Output {
@@ -100,6 +101,7 @@ impl From<wardmap_parser::Output> for Output {
             scouting_version: value.scouting_version,
             scouting_tau_seconds: value.scouting_tau_seconds,
             scouting_complete: value.scouting_complete,
+            measurement_json: value.measurement_json,
         }
     }
 }

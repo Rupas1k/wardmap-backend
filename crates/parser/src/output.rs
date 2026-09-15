@@ -61,4 +61,5 @@ pub struct Output {
     pub scouting_version: Option<i16>,
     pub scouting_tau_seconds: Option<f64>,
     pub scouting_complete: Option<bool>,
+    pub measurement_json: Option<String>,
 }

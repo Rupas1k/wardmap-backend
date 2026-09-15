@@ -2,13 +2,13 @@ import math
 from typing import Any
 
 from flask import Blueprint, request
-from sqlalchemy import case, exists, func, select
+from sqlalchemy import Boolean, case, cast, exists, false, func, literal, select, true, union_all
 from sqlalchemy.orm import aliased
-from werkzeug.exceptions import BadRequest
+from werkzeug.exceptions import BadRequest, NotFound
 
 from ..access import max_ward_page_size
 from ..extensions import db
-from ..models import Match, Player, Team, Ward, players_matches
+from ..models import League, Match, Player, Team, Ward, players_matches
 
 bp = Blueprint("wards", __name__)
 MAX_FILTER_IDS = 500
@@ -45,6 +45,11 @@ def unit_display_name(unit_name: str | None) -> str | None:
 
 def ward_response(row: Any) -> dict[str, Any]:
     data = row._asdict()
+    if data.get("measurement") is not None:
+        measurement = dict(data["measurement"])
+        intervals = measurement.pop("intervals", [])
+        measurement["interval_count"] = len(intervals)
+        data["measurement"] = measurement
     npc_killed = data.pop("npc_killed")
 
     if not data["is_destroyed"]:
@@ -54,6 +59,15 @@ def ward_response(row: Any) -> dict[str, Any]:
         data["player_destroyed_name"] = unit_display_name(npc_killed)
 
     return data
+
+
+@bp.get("/wards/<int:ward_id>/evidence")
+def ward_evidence(ward_id: int):
+    ward = db.session.get(Ward, ward_id)
+    if ward is None:
+        raise NotFound("Ward not found")
+
+    return {"ward_id": ward.id, "measurement": ward.measurement}
 
 
 def integer_list(filters: Any, name: str) -> list[int]:
@@ -143,7 +157,10 @@ def ward_query():
             Ward.scouting_version,
             Ward.scouting_tau_seconds,
             Ward.scouting_complete,
+            Ward.measurement,
             Match.duration.label("match_duration"),
+            Match.game_version,
+            League.map_asset_version,
             owner_team_id.label("team_id"),
             owner_team.name.label("team_name"),
             opponent_team_id.label("opponent_team_id"),
@@ -152,6 +169,7 @@ def ward_query():
         )
         .select_from(Ward)
         .join(Match, Match.id == Ward.match_id)
+        .outerjoin(League, League.id == Match.league_id)
         .outerjoin(Player, Player.id == Ward.player_placed_id)
         .outerjoin(destroying_player, destroying_player.id == Ward.player_destroyed_id)
         .outerjoin(owner_team, owner_team.id == owner_team_id)
@@ -358,3 +376,107 @@ def query_wards():
         return response
 
     return paginated_response(query, filters)
+
+
+@bp.post("/wards/population")
+def ward_population():
+    filters = request.get_json(silent=True) or {}
+    if not isinstance(filters, dict):
+        raise BadRequest("request body must be a JSON object")
+
+    ids = id_filters(filters)
+    radiant = select(
+        Match.id.label("match_id"),
+        cast(true(), Boolean).label("is_radiant"),
+        Match.radiant_team_id.label("team_id"),
+        Match.dire_team_id.label("opponent_team_id"),
+        Match.duration,
+        Match.league_id,
+        Match.radiant_win.label("team_won"),
+    )
+    dire = select(
+        Match.id.label("match_id"),
+        cast(false(), Boolean).label("is_radiant"),
+        Match.dire_team_id.label("team_id"),
+        Match.radiant_team_id.label("opponent_team_id"),
+        Match.duration,
+        Match.league_id,
+        (~Match.radiant_win).label("team_won"),
+    )
+    population = union_all(radiant, dire).subquery()
+    query = select(population)
+
+    if ids["league_ids"]:
+        query = query.where(population.c.league_id.in_(ids["league_ids"]))
+    if ids["match_ids"]:
+        query = query.where(population.c.match_id.in_(ids["match_ids"]))
+    if ids["team_ids"]:
+        query = query.where(population.c.team_id.in_(ids["team_ids"]))
+    if ids["opponent_team_ids"]:
+        query = query.where(population.c.opponent_team_id.in_(ids["opponent_team_ids"]))
+
+    side = filters.get("side", "all")
+    if side not in ("all", "radiant", "dire"):
+        raise BadRequest("side must be all, radiant, or dire")
+    if side != "all":
+        query = query.where(population.c.is_radiant.is_(side == "radiant"))
+
+    team_result = filters.get("team_result", "all")
+    if team_result not in ("all", "won", "lost"):
+        raise BadRequest("team_result must be all, won, or lost")
+    if team_result != "all":
+        query = query.where(population.c.team_won.is_(team_result == "won"))
+
+    minimum_duration = integer_filter(filters, "minimum_match_duration", 0)
+    maximum_duration = integer_filter(filters, "maximum_match_duration", 180)
+    if minimum_duration < 0 or maximum_duration < minimum_duration:
+        raise BadRequest("invalid match duration range")
+    query = query.where(
+        population.c.duration >= minimum_duration * 60,
+        population.c.duration <= maximum_duration * 60,
+    )
+    minimum_game_minute = number_filter(filters, "minimum_game_minute", -1.5)
+    if minimum_game_minute < -1.5:
+        raise BadRequest("invalid game minute range")
+    if minimum_game_minute > 0:
+        query = query.where(population.c.duration >= minimum_game_minute * 60)
+
+    for name, opposite in (("player_ids", False), ("opponent_player_ids", True)):
+        if not ids[name]:
+            continue
+        participation = players_matches.alias(f"population_{name}")
+        same_side = participation.c.is_radiant == population.c.is_radiant
+        query = query.where(
+            exists(
+                select(literal(1)).where(
+                    participation.c.match_id == population.c.match_id,
+                    participation.c.player_id.in_(ids[name]),
+                    ~same_side if opposite else same_side,
+                )
+            )
+        )
+
+    selected = query.subquery()
+    row = db.session.execute(
+        select(
+            func.count().label("match_sides"),
+            func.count(func.distinct(selected.c.match_id)).label("matches"),
+        ).select_from(selected)
+    ).one()
+
+    quality_filters = bool(
+        ids["destroyed_by_player_ids"]
+        or filters.get("outcome", "all") != "all"
+        or filters.get("minimum_ward_lifetime", 0) != 0
+        or filters.get("maximum_ward_lifetime", 600) != 600
+        or any(
+            value is not None and any(word in key for word in ("scouting", "vision", "spotted", "reveal"))
+            for key, value in filters.items()
+        )
+    )
+
+    return {
+        "matches": row.matches,
+        "match_sides": row.match_sides,
+        "selection_conditioned": team_result != "all" or quality_filters,
+    }

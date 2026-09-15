@@ -34,6 +34,16 @@ def test_query_wards_applies_dataset_filters():
             )
         )
         db.session.add(
+            Match(
+                id=101,
+                league_id=42,
+                duration=2400,
+                radiant_team_id=10,
+                dire_team_id=20,
+                radiant_win=False,
+            )
+        )
+        db.session.add(
             Ward(
                 match_id=100,
                 is_obs=True,
@@ -103,10 +113,24 @@ def test_query_wards_applies_dataset_filters():
                     "count_only": True,
                 },
             )
+            population_response = client.post(
+                "/wards/population",
+                json={
+                    "league_ids": [42],
+                    "side": "radiant",
+                    "minimum_match_duration": 30,
+                    "maximum_match_duration": 60,
+                },
+            )
 
     assert response.status_code == 200
     assert count_response.status_code == 200
     assert count_response.get_json() == {"count": 1}
+    assert population_response.get_json() == {
+        "matches": 2,
+        "match_sides": 2,
+        "selection_conditioned": False,
+    }
     assert response.get_json() == {
         "data": [
             {
@@ -134,7 +158,10 @@ def test_query_wards_applies_dataset_filters():
                 "scouting_score": 105.75,
                 "scouting_version": None,
                 "scouting_tau_seconds": None,
-                "scouting_complete": None,
+                    "scouting_complete": None,
+                    "measurement": None,
+                    "game_version": None,
+                    "map_asset_version": 2,
                 "match_duration": 2400,
                 "team_id": 10,
                 "team_name": "Radiant Team",

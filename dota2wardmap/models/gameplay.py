@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     SmallInteger,
     String,
 )
@@ -154,6 +155,7 @@ class Ward(db.Model):
     scouting_version: Mapped[int | None] = mapped_column(SmallInteger)
     scouting_tau_seconds: Mapped[float | None] = mapped_column(Float)
     scouting_complete: Mapped[bool | None] = mapped_column(Boolean)
+    measurement: Mapped[dict[str, object] | None] = mapped_column(JSON(none_as_null=True))
 
     npc_killed: Mapped[str | None] = mapped_column(String)
 

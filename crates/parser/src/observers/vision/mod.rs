@@ -8,8 +8,8 @@ use source2_demo::proto::DotaCombatlogTypes;
 mod grid;
 use grid::VisionGrid;
 mod metrics;
-use metrics::{Observation, Sight, VisionMetrics, SAMPLE_INTERVAL_TICKS};
-pub use metrics::{WardVisionMetrics, DISCOVERY_TAU_SECONDS, SCOUTING_VERSION};
+use metrics::{Observation, PlayerObservation, Sight, VisionMetrics, SAMPLE_INTERVAL_TICKS};
+pub use metrics::{WardMeasurement, WardVisionMetrics, DISCOVERY_TAU_SECONDS, SCOUTING_VERSION};
 
 use crate::observers::game_time::GameTime;
 use crate::observers::players::Players;
@@ -25,6 +25,9 @@ pub struct Vision {
     provider_handles: HashSet<u32>,
     next_sample_tick: Option<i32>,
     metrics: VisionMetrics,
+    measured_metrics: VisionMetrics,
+    measurement_finished: bool,
+    invisible_modifiers: HashSet<(u64, String)>,
     providers_changed: bool,
     previous_sample_tick: Option<i32>,
     active_observers: HashSet<u32>,
@@ -44,6 +47,10 @@ impl Vision {
 
     pub fn scouting_complete(&self, handle: u32) -> bool {
         !self.incomplete_wards.contains(&handle)
+    }
+
+    pub fn measurement(&self, handle: u32) -> WardMeasurement {
+        self.measured_metrics.measurement(handle)
     }
 
     fn sample(&mut self, ctx: &Context, tick: i32) {
@@ -78,7 +85,11 @@ impl Vision {
         for player in &players.players {
             let player = player.borrow();
             let Ok(hero) = ctx.entities().get_by_handle(player.handle) else {
-                observations.push((player.id, Observation::Unknown));
+                observations.push(PlayerObservation {
+                    id: player.id,
+                    team: player.team,
+                    state: Observation::Unknown,
+                });
                 continue;
             };
 
@@ -115,18 +126,58 @@ impl Vision {
                     non_ward: has_non_ward_provider,
                 })
             };
-            observations.push((player.id, observation));
+            observations.push(PlayerObservation {
+                id: player.id,
+                team: player.team,
+                state: observation,
+            });
         }
         let has_gap = self
             .previous_sample_tick
             .is_some_and(|previous| tick < previous || tick - previous > SAMPLE_INTERVAL_TICKS);
-        if has_gap || !providers_known || observations.iter().any(|(_, state)| matches!(state, Observation::Unknown)) {
+        if has_gap
+            || !providers_known
+            || observations
+                .iter()
+                .any(|observation| matches!(observation.state, Observation::Unknown))
+        {
             self.incomplete_wards.extend(&self.active_observers);
             self.incomplete_wards.extend(&active_observers);
         }
         self.previous_sample_tick = Some(tick);
         self.active_observers = active_observers;
-        self.metrics.sample(tick as f64 / 30.0, observations);
+        let active_wards = providers
+            .iter()
+            .filter(|provider| provider.is_observer)
+            .map(|provider| (provider.handle, provider.team))
+            .collect::<Vec<_>>();
+        let time = tick as f64 / 30.0;
+        self.metrics.sample(time, observations.clone(), &active_wards);
+
+        if !self.measurement_finished {
+            for observation in &mut observations {
+                let unsupported_body = players.players.iter().any(|player| {
+                    let player = player.borrow();
+                    player.id == observation.id
+                        && ctx.entities().get_by_handle(player.handle).is_ok_and(|hero| {
+                            matches!(hero.class().name(), "CDOTA_Unit_Hero_Meepo" | "CDOTA_Unit_Hero_ArcWarden")
+                        })
+                });
+                if unsupported_body || self.invisible_modifiers.iter().any(|(id, _)| *id == observation.id) {
+                    observation.state = Observation::Unknown;
+                }
+            }
+            let end = ctx
+                .entities()
+                .get_by_class_name("CDOTAGamerulesProxy")
+                .ok()
+                .and_then(|rules| try_property!(rules, f32, "m_pGameRules.m_flGameEndTime"))
+                .filter(|end| end.is_finite() && *end > 0.0)
+                .map(f64::from);
+            let measurement_time = end.map_or(time, |end| time.min(end));
+            self.measured_metrics.sample(measurement_time, observations, &active_wards);
+            self.measurement_finished = end.is_some_and(|end| time >= end);
+        }
     }
 
     fn is_day(&self, ctx: &Context) -> bool {
@@ -222,7 +273,9 @@ impl Vision {
             return Ok(());
         }
 
-        if combat_log.inflictor_name().ok() != Some("modifier_smoke_of_deceit") {
+        let modifier = combat_log.inflictor_name().unwrap_or("");
+        let smoke = modifier == "modifier_smoke_of_deceit";
+        if !smoke && combat_log.log().invisibility_modifier != Some(true) {
             return Ok(());
         }
 
@@ -235,6 +288,19 @@ impl Vision {
         };
 
         let player_id = player.borrow().id;
+
+        if !smoke {
+            if combat_log.log().is_target_illusion != Some(true) {
+                let key = (player_id, modifier.to_owned());
+                if event == DotaCombatlogTypes::DotaCombatlogModifierAdd {
+                    self.invisible_modifiers.insert(key);
+                } else {
+                    self.invisible_modifiers.remove(&key);
+                }
+                self.providers_changed = true;
+            }
+            return Ok(());
+        }
 
         if event == DotaCombatlogTypes::DotaCombatlogModifierAdd {
             self.smoked_heroes.insert(player_id);

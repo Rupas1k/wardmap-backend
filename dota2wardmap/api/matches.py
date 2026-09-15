@@ -8,7 +8,7 @@ from ..access import require_access
 from ..domain import AccessLevel
 from ..extensions import db
 from ..integrations import opendota
-from ..models import League, Match, Ward
+from ..models import League, Match
 from ..replay.collector import sync_league
 
 bp = Blueprint("matches", __name__)
@@ -66,7 +66,6 @@ def leagues():
             func.count(distinct(Match.id)).label("parsed_matches"),
             func.max(Match.id).label("latest_parsed_match_id"),
         )
-        .join(Ward, Ward.match_id == Match.id)
         .where(Match.league_id.is_not(None))
         .group_by(Match.league_id)
         .subquery()

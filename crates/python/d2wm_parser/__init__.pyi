@@ -27,6 +27,7 @@ class Output:
     scouting_version: int | None
     scouting_tau_seconds: float | None
     scouting_complete: bool | None
+    measurement_json: str | None
 
 def parse_replay(data: bytes) -> Replay: ...
 

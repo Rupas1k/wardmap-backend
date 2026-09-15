@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 from multiprocessing.queues import Queue
@@ -49,6 +50,7 @@ def download_and_parse_replay(match_id: int, result_queue: Queue) -> None:
                 "scouting_version": item.scouting_version,
                 "scouting_tau_seconds": item.scouting_tau_seconds,
                 "scouting_complete": item.scouting_complete,
+                "measurement": json.loads(item.measurement_json) if item.measurement_json is not None else None,
             }
             for item in output
         ]
