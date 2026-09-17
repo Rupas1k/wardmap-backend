@@ -9,8 +9,6 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 testpaths = ["tests"]
 
 [tool.pyright]
-venvPath = "."
-venv = ".venv"
 typeCheckingMode = "basic"
 include = ["dota2wardmap", "crates/python"]
 exclude = ["dota2wardmap/migrations", "tests"]

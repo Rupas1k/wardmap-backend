@@ -222,6 +222,34 @@ class FreshSightingEvent(db.Model):
     target_z: Mapped[float] = mapped_column(Float, nullable=False)
     hidden_seconds: Mapped[float] = mapped_column(Float, nullable=False)
 
+    def __init__(
+        self,
+        match_id: int,
+        sample_tick: int,
+        time_seconds: float,
+        target_player_slot: int,
+        target_steam_id: str | None,
+        target_player_id: int | None,
+        target_hero_name: str,
+        target_is_radiant: bool,
+        target_x: float,
+        target_y: float,
+        target_z: float,
+        hidden_seconds: float,
+    ) -> None:
+        self.match_id = match_id
+        self.sample_tick = sample_tick
+        self.time_seconds = time_seconds
+        self.target_player_slot = target_player_slot
+        self.target_steam_id = target_steam_id
+        self.target_player_id = target_player_id
+        self.target_hero_name = target_hero_name
+        self.target_is_radiant = target_is_radiant
+        self.target_x = target_x
+        self.target_y = target_y
+        self.target_z = target_z
+        self.hidden_seconds = hidden_seconds
+
 
 class WardFreshSightingCredit(db.Model):
     __tablename__ = "ward_fresh_sighting_credits"
@@ -243,6 +271,24 @@ class WardFreshSightingCredit(db.Model):
     lost_y: Mapped[float | None] = mapped_column(Float)
     lost_z: Mapped[float | None] = mapped_column(Float)
 
+    def __init__(
+        self,
+        event_id: int,
+        ward_id: int,
+        credit: float,
+        visible_seconds: float | None,
+        lost_x: float | None,
+        lost_y: float | None,
+        lost_z: float | None,
+    ) -> None:
+        self.event_id = event_id
+        self.ward_id = ward_id
+        self.credit = credit
+        self.visible_seconds = visible_seconds
+        self.lost_x = lost_x
+        self.lost_y = lost_y
+        self.lost_z = lost_z
+
 
 class FreshSightingRoutePoint(db.Model):
     __tablename__ = "fresh_sighting_route_points"
@@ -261,3 +307,21 @@ class FreshSightingRoutePoint(db.Model):
     x: Mapped[float] = mapped_column(Float, nullable=False)
     y: Mapped[float] = mapped_column(Float, nullable=False)
     z: Mapped[float] = mapped_column(Float, nullable=False)
+
+    def __init__(
+        self,
+        event_id: int,
+        ward_id: int,
+        sequence: int,
+        time_seconds: float,
+        x: float,
+        y: float,
+        z: float,
+    ) -> None:
+        self.event_id = event_id
+        self.ward_id = ward_id
+        self.sequence = sequence
+        self.time_seconds = time_seconds
+        self.x = x
+        self.y = y
+        self.z = z

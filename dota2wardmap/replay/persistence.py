@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -25,6 +26,9 @@ ParsedReplay = tuple[int, dict[str, Any], list[dict[str, Any]]]
 
 
 def _account_id(steam_id: object) -> int | None:
+    if not isinstance(steam_id, (str, bytes, bytearray, int, float)):
+        return None
+
     try:
         value = int(steam_id)
     except (TypeError, ValueError):
@@ -164,7 +168,7 @@ def _ward_signature(ward: Ward | dict[str, Any]) -> tuple[object, ...]:
 
 def _match_parsed_wards(
     match_id: int,
-    existing: list[Ward],
+    existing: Sequence[Ward],
     parsed_wards: list[dict[str, Any]],
 ) -> list[tuple[Ward, dict[str, Any]]]:
     candidates = [ward for ward in parsed_wards if ward.get("measurement") is not None]
