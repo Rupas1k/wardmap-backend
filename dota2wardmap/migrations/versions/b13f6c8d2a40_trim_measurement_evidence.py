@@ -29,9 +29,7 @@ def upgrade() -> None:
     for ward_id, evidence in rows:
         sightings = evidence.get("sightings", []) if isinstance(evidence, dict) else []
         connection.execute(
-            sa.update(wards)
-            .where(wards.c.id == ward_id)
-            .values(measurement_evidence={"sightings": sightings})
+            sa.update(wards).where(wards.c.id == ward_id).values(measurement_evidence={"sightings": sightings})
         )
 
 

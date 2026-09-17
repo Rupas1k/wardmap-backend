@@ -82,33 +82,33 @@ def persist_parsed_replay(result: ParsedReplay) -> bool:
                 ward_data["player_destroyed_steam_id"] -= 76561197960265728
 
             values = {
-                    "match_id": match_id,
-                    "is_obs": ward_data["is_obs"],
-                    "is_radiant": ward_data["is_radiant"],
-                    "is_destroyed": ward_data["event"] == "killed",
-                    "is_post_game": ward_data["post_game"],
-                    "player_placed_id": ward_data["player_placed_steam_id"],
-                    "player_destroyed_id": ward_data["player_destroyed_steam_id"],
-                    "time_placed": ward_data["time_placed"],
-                    "duration": ward_data["duration"],
-                    "x_pos": ward_data["x"] * 128 + round(ward_data["vec_x"]),
-                    "y_pos": ward_data["y"] * 128 + round(ward_data["vec_y"]),
-                    "z_pos": ward_data["z"] * 128 + round(ward_data["vec_z"]),
-                    "radiant_networth": ward_data["radiant_networth"],
-                    "dire_networth": ward_data["dire_networth"],
-                    "enemy_hero_vision_seconds": ward_data["enemy_hero_vision_seconds"],
-                    "unique_enemy_hero_vision_seconds": ward_data["unique_enemy_hero_vision_seconds"],
-                    "heroes_spotted": ward_data["heroes_spotted"],
-                    "hero_reveal_events": ward_data["hero_reveal_events"],
-                    "unique_hero_reveal_events": ward_data["unique_hero_reveal_events"],
-                    "scouting_tracking_seconds": ward_data.get("scouting_tracking_seconds"),
-                    "scouting_discovery_seconds": ward_data.get("scouting_discovery_seconds"),
-                    "scouting_score": ward_data.get("scouting_score"),
-                    "scouting_version": ward_data.get("scouting_version"),
-                    "scouting_tau_seconds": ward_data.get("scouting_tau_seconds"),
-                    "scouting_complete": ward_data.get("scouting_complete"),
-                    "npc_killed": ward_data["npc_killed"],
-                }
+                "match_id": match_id,
+                "is_obs": ward_data["is_obs"],
+                "is_radiant": ward_data["is_radiant"],
+                "is_destroyed": ward_data["event"] == "killed",
+                "is_post_game": ward_data["post_game"],
+                "player_placed_id": ward_data["player_placed_steam_id"],
+                "player_destroyed_id": ward_data["player_destroyed_steam_id"],
+                "time_placed": ward_data["time_placed"],
+                "duration": ward_data["duration"],
+                "x_pos": ward_data["x"] * 128 + round(ward_data["vec_x"]),
+                "y_pos": ward_data["y"] * 128 + round(ward_data["vec_y"]),
+                "z_pos": ward_data["z"] * 128 + round(ward_data["vec_z"]),
+                "radiant_networth": ward_data["radiant_networth"],
+                "dire_networth": ward_data["dire_networth"],
+                "enemy_hero_vision_seconds": ward_data["enemy_hero_vision_seconds"],
+                "unique_enemy_hero_vision_seconds": ward_data["unique_enemy_hero_vision_seconds"],
+                "heroes_spotted": ward_data["heroes_spotted"],
+                "hero_reveal_events": ward_data["hero_reveal_events"],
+                "unique_hero_reveal_events": ward_data["unique_hero_reveal_events"],
+                "scouting_tracking_seconds": ward_data.get("scouting_tracking_seconds"),
+                "scouting_discovery_seconds": ward_data.get("scouting_discovery_seconds"),
+                "scouting_score": ward_data.get("scouting_score"),
+                "scouting_version": ward_data.get("scouting_version"),
+                "scouting_tau_seconds": ward_data.get("scouting_tau_seconds"),
+                "scouting_complete": ward_data.get("scouting_complete"),
+                "npc_killed": ward_data["npc_killed"],
+            }
             measurement = ward_data.get("measurement")
             values.update(_measurement_values(measurement))
             wards.append(values)
@@ -195,9 +195,7 @@ def _replace_fresh_sightings(match_id: int, matches: list[tuple[Ward, dict[str, 
             if player_id is not None:
                 target_sides[player_id] = bool(sighting["target_is_radiant"])
 
-    existing_player_ids = set(
-        db.session.execute(select(Player.id).where(Player.id.in_(target_sides))).scalars().all()
-    )
+    existing_player_ids = set(db.session.execute(select(Player.id).where(Player.id.in_(target_sides))).scalars().all())
     db.session.add_all(Player(id=player_id) for player_id in target_sides.keys() - existing_player_ids)
     db.session.flush()
     if target_sides:

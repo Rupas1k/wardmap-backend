@@ -14,9 +14,9 @@ logger = logging.getLogger(__name__)
 
 
 def reprocess_league(league_id: int) -> int:
-    match_ids = db.session.execute(
-        select(Match.id).where(Match.league_id == league_id).order_by(Match.id)
-    ).scalars().all()
+    match_ids = (
+        db.session.execute(select(Match.id).where(Match.league_id == league_id).order_by(Match.id)).scalars().all()
+    )
     failed = 0
 
     for index, match_id in enumerate(match_ids, 1):

@@ -185,9 +185,11 @@ def test_persist_parsed_replay_persists_opendota_participants():
         radiant_team = db.session.get(Team, 10)
         sighting = db.session.execute(select(FreshSightingEvent)).scalar_one()
         sighting_credit = db.session.execute(select(WardFreshSightingCredit)).scalar_one()
-        route = db.session.execute(
-            select(FreshSightingRoutePoint).order_by(FreshSightingRoutePoint.sequence)
-        ).scalars().all()
+        route = (
+            db.session.execute(select(FreshSightingRoutePoint).order_by(FreshSightingRoutePoint.sequence))
+            .scalars()
+            .all()
+        )
 
         assert player is not None and player.name == "SumaiL-"
         assert match is not None and player in match.players

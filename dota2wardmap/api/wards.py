@@ -157,8 +157,7 @@ def ward_evidence(ward_id: int):
                 "target_position": [event.target_x, event.target_y, event.target_z],
                 "hidden_seconds": event.hidden_seconds,
                 "visible_seconds": credit.visible_seconds,
-                "lost_position":
-                    [credit.lost_x, credit.lost_y, credit.lost_z] if credit.lost_x is not None else None,
+                "lost_position": [credit.lost_x, credit.lost_y, credit.lost_z] if credit.lost_x is not None else None,
                 "route": routes.get((event.id, credit.ward_id), []),
                 "credit": credit.credit,
             }

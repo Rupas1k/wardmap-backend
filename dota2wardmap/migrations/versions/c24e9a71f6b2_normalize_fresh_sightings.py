@@ -21,8 +21,12 @@ def upgrade() -> None:
     with op.batch_alter_table("players_matches") as batch:
         batch.alter_column("player_id", existing_type=sa.Integer(), type_=sa.BigInteger(), existing_nullable=False)
     with op.batch_alter_table("wards") as batch:
-        batch.alter_column("player_placed_id", existing_type=sa.Integer(), type_=sa.BigInteger(), existing_nullable=True)
-        batch.alter_column("player_destroyed_id", existing_type=sa.Integer(), type_=sa.BigInteger(), existing_nullable=True)
+        batch.alter_column(
+            "player_placed_id", existing_type=sa.Integer(), type_=sa.BigInteger(), existing_nullable=True
+        )
+        batch.alter_column(
+            "player_destroyed_id", existing_type=sa.Integer(), type_=sa.BigInteger(), existing_nullable=True
+        )
 
     op.create_table(
         "fresh_sighting_events",
@@ -79,8 +83,12 @@ def downgrade() -> None:
     op.drop_table("fresh_sighting_events")
 
     with op.batch_alter_table("wards") as batch:
-        batch.alter_column("player_destroyed_id", existing_type=sa.BigInteger(), type_=sa.Integer(), existing_nullable=True)
-        batch.alter_column("player_placed_id", existing_type=sa.BigInteger(), type_=sa.Integer(), existing_nullable=True)
+        batch.alter_column(
+            "player_destroyed_id", existing_type=sa.BigInteger(), type_=sa.Integer(), existing_nullable=True
+        )
+        batch.alter_column(
+            "player_placed_id", existing_type=sa.BigInteger(), type_=sa.Integer(), existing_nullable=True
+        )
     with op.batch_alter_table("players_matches") as batch:
         batch.alter_column("player_id", existing_type=sa.BigInteger(), type_=sa.Integer(), existing_nullable=False)
     with op.batch_alter_table("players") as batch:
