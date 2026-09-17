@@ -25,9 +25,17 @@ def test_upgrade_creates_schema_from_single_baseline(monkeypatch, tmp_path):
 
     with engine.connect() as connection:
         version = connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one()
-    assert version == "6d2f7b4a91c3"
+    assert version == "e46ab93d8f20"
     ward_columns = {column["name"] for column in inspect(engine).get_columns("wards")}
-    assert {"scouting_score", "scouting_tracking_seconds", "scouting_discovery_seconds", "measurement"} <= ward_columns
+    assert {
+        "scouting_score",
+        "scouting_tracking_seconds",
+        "scouting_discovery_seconds",
+        "measurement_version",
+        "added_vision_seconds",
+        "measurement_evidence",
+    } <= ward_columns
+    assert "measurement" not in ward_columns
 
 
 def test_scouting_upgrade_preserves_existing_wards_as_unmeasured(monkeypatch, tmp_path):
@@ -50,6 +58,6 @@ def test_scouting_upgrade_preserves_existing_wards_as_unmeasured(monkeypatch, tm
     assert result.exit_code == 0, result.output
     with engine.connect() as connection:
         row = connection.exec_driver_sql(
-            "SELECT duration, scouting_score, scouting_version, scouting_complete, measurement FROM wards"
+            "SELECT duration, scouting_score, scouting_version, scouting_complete, measurement_version FROM wards"
         ).one()
     assert tuple(row) == (360, None, None, None, None)
