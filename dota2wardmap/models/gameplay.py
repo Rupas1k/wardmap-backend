@@ -10,11 +10,13 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     JSON,
     SmallInteger,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -24,7 +26,7 @@ from ..extensions import db
 players_matches = db.Table(
     "players_matches",
     db.metadata,
-    Column("player_id", Integer, ForeignKey("players.id"), primary_key=True),
+    Column("player_id", BigInteger, ForeignKey("players.id"), primary_key=True),
     Column("match_id", BigInteger, ForeignKey("matches.id"), primary_key=True),
     Column("is_radiant", Boolean),
     Index("ix_players_matches_opponent_lookup", "match_id", "is_radiant", "player_id"),
@@ -133,8 +135,8 @@ class Ward(db.Model):
     is_radiant: Mapped[bool | None] = mapped_column(Boolean)
     is_destroyed: Mapped[bool] = mapped_column(Boolean, nullable=False)
     is_post_game: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    player_placed_id: Mapped[int | None] = mapped_column(ForeignKey("players.id"), index=True)
-    player_destroyed_id: Mapped[int | None] = mapped_column(ForeignKey("players.id"))
+    player_placed_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("players.id"), index=True)
+    player_destroyed_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("players.id"))
     time_placed: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     duration: Mapped[int] = mapped_column(SmallInteger, nullable=False)
 
@@ -155,7 +157,20 @@ class Ward(db.Model):
     scouting_version: Mapped[int | None] = mapped_column(SmallInteger)
     scouting_tau_seconds: Mapped[float | None] = mapped_column(Float)
     scouting_complete: Mapped[bool | None] = mapped_column(Boolean)
-    measurement: Mapped[dict[str, object] | None] = mapped_column(JSON(none_as_null=True))
+    measurement_version: Mapped[int | None] = mapped_column(SmallInteger)
+    measurement_revision: Mapped[int | None] = mapped_column(SmallInteger)
+    added_vision_seconds: Mapped[float | None] = mapped_column(Float)
+    fresh_sightings: Mapped[float | None] = mapped_column(Float)
+    fresh_sighting_threshold_seconds: Mapped[float | None] = mapped_column(Float)
+    vision_measured_seconds: Mapped[float | None] = mapped_column(Float)
+    vision_possible_seconds: Mapped[float | None] = mapped_column(Float)
+    vision_coverage: Mapped[float | None] = mapped_column(Float)
+    placed_at_seconds: Mapped[float | None] = mapped_column(Float)
+    ended_at_seconds: Mapped[float | None] = mapped_column(Float)
+    outcome: Mapped[str | None] = mapped_column(String(24), index=True)
+    outcome_reason: Mapped[str | None] = mapped_column(String(32))
+    vision_complete: Mapped[bool | None] = mapped_column(Boolean)
+    measurement_evidence: Mapped[dict[str, object] | None] = mapped_column(JSON(none_as_null=True))
 
     npc_killed: Mapped[str | None] = mapped_column(String)
 
@@ -169,7 +184,7 @@ class Ward(db.Model):
 class Player(db.Model):
     __tablename__ = "players"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     name: Mapped[str | None] = mapped_column(String)
 
     wards_placed: Mapped[list[Ward]] = relationship(
@@ -183,3 +198,66 @@ class Player(db.Model):
     def __init__(self, id: int, name: str | None = None) -> None:
         self.id = id
         self.name = name
+
+
+class FreshSightingEvent(db.Model):
+    __tablename__ = "fresh_sighting_events"
+    __table_args__ = (
+        UniqueConstraint("match_id", "sample_tick", "target_player_slot", name="uq_fresh_sighting_match_tick_slot"),
+        Index("ix_fresh_sighting_target_time", "target_player_id", "time_seconds"),
+        Index("ix_fresh_sighting_hero_time", "target_hero_name", "time_seconds"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    match_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("matches.id", ondelete="CASCADE"), index=True)
+    sample_tick: Mapped[int] = mapped_column(Integer, nullable=False)
+    time_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    target_player_slot: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    target_steam_id: Mapped[str | None] = mapped_column(String(20))
+    target_player_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("players.id"), index=True)
+    target_hero_name: Mapped[str] = mapped_column(String(96), nullable=False)
+    target_is_radiant: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    target_x: Mapped[float] = mapped_column(Float, nullable=False)
+    target_y: Mapped[float] = mapped_column(Float, nullable=False)
+    target_z: Mapped[float] = mapped_column(Float, nullable=False)
+    hidden_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class WardFreshSightingCredit(db.Model):
+    __tablename__ = "ward_fresh_sighting_credits"
+
+    event_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("fresh_sighting_events.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    ward_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("wards.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    credit: Mapped[float] = mapped_column(Float, nullable=False)
+    visible_seconds: Mapped[float | None] = mapped_column(Float)
+    lost_x: Mapped[float | None] = mapped_column(Float)
+    lost_y: Mapped[float | None] = mapped_column(Float)
+    lost_z: Mapped[float | None] = mapped_column(Float)
+
+
+class FreshSightingRoutePoint(db.Model):
+    __tablename__ = "fresh_sighting_route_points"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["event_id", "ward_id"],
+            ["ward_fresh_sighting_credits.event_id", "ward_fresh_sighting_credits.ward_id"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    event_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    ward_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sequence: Mapped[int] = mapped_column(Integer, primary_key=True)
+    time_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    x: Mapped[float] = mapped_column(Float, nullable=False)
+    y: Mapped[float] = mapped_column(Float, nullable=False)
+    z: Mapped[float] = mapped_column(Float, nullable=False)

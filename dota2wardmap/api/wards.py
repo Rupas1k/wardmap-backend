@@ -8,7 +8,17 @@ from werkzeug.exceptions import BadRequest, NotFound
 
 from ..access import max_ward_page_size
 from ..extensions import db
-from ..models import League, Match, Player, Team, Ward, players_matches
+from ..models import (
+    FreshSightingEvent,
+    FreshSightingRoutePoint,
+    League,
+    Match,
+    Player,
+    Team,
+    Ward,
+    WardFreshSightingCredit,
+    players_matches,
+)
 
 bp = Blueprint("wards", __name__)
 MAX_FILTER_IDS = 500
@@ -45,11 +55,42 @@ def unit_display_name(unit_name: str | None) -> str | None:
 
 def ward_response(row: Any) -> dict[str, Any]:
     data = row._asdict()
-    if data.get("measurement") is not None:
-        measurement = dict(data["measurement"])
-        intervals = measurement.pop("intervals", [])
-        measurement["interval_count"] = len(intervals)
-        data["measurement"] = measurement
+    evidence = data.pop("measurement_evidence") or {}
+    if data["measurement_version"] is None:
+        data["measurement"] = None
+    else:
+        data["measurement"] = {
+            "version": data.pop("measurement_version"),
+            "revision": data.pop("measurement_revision"),
+            "added_vision_seconds": data.pop("added_vision_seconds"),
+            "fresh_sightings": data.pop("fresh_sightings"),
+            "fresh_sighting_threshold_seconds": data.pop("fresh_sighting_threshold_seconds"),
+            "vision_measured_seconds": data.pop("vision_measured_seconds"),
+            "vision_possible_seconds": data.pop("vision_possible_seconds"),
+            "vision_coverage": data.pop("vision_coverage"),
+            "placed_at_seconds": data.pop("placed_at_seconds"),
+            "ended_at_seconds": data.pop("ended_at_seconds"),
+            "outcome": data.pop("outcome"),
+            "outcome_reason": data.pop("outcome_reason"),
+            "vision_complete": data.pop("vision_complete"),
+            "sightings": evidence.get("sightings", []),
+        }
+    for name in (
+        "measurement_version",
+        "measurement_revision",
+        "added_vision_seconds",
+        "fresh_sightings",
+        "fresh_sighting_threshold_seconds",
+        "vision_measured_seconds",
+        "vision_possible_seconds",
+        "vision_coverage",
+        "placed_at_seconds",
+        "ended_at_seconds",
+        "outcome",
+        "outcome_reason",
+        "vision_complete",
+    ):
+        data.pop(name, None)
     npc_killed = data.pop("npc_killed")
 
     if not data["is_destroyed"]:
@@ -67,7 +108,63 @@ def ward_evidence(ward_id: int):
     if ward is None:
         raise NotFound("Ward not found")
 
-    return {"ward_id": ward.id, "measurement": ward.measurement}
+    rows = db.session.execute(
+        select(
+            FreshSightingEvent,
+            WardFreshSightingCredit,
+            Player.name.label("target_player_name"),
+        )
+        .join(WardFreshSightingCredit, WardFreshSightingCredit.event_id == FreshSightingEvent.id)
+        .outerjoin(Player, Player.id == FreshSightingEvent.target_player_id)
+        .where(WardFreshSightingCredit.ward_id == ward_id)
+        .order_by(FreshSightingEvent.time_seconds, FreshSightingEvent.id)
+    ).all()
+    event_ids = [event.id for event, _, _ in rows]
+    routes: dict[tuple[int, int], list[dict[str, object]]] = {}
+    if event_ids:
+        route_rows = db.session.execute(
+            select(FreshSightingRoutePoint)
+            .where(
+                FreshSightingRoutePoint.event_id.in_(event_ids),
+                FreshSightingRoutePoint.ward_id == ward_id,
+            )
+            .order_by(
+                FreshSightingRoutePoint.event_id,
+                FreshSightingRoutePoint.ward_id,
+                FreshSightingRoutePoint.sequence,
+            )
+        ).scalars()
+        for point in route_rows:
+            routes.setdefault((point.event_id, point.ward_id), []).append(
+                {"time": point.time_seconds, "position": [point.x, point.y, point.z]}
+            )
+
+    return {
+        "ward_id": ward.id,
+        "measurement_version": ward.measurement_version,
+        "measurement_revision": ward.measurement_revision,
+        "sightings": [
+            {
+                "event_id": event.id,
+                "sample_tick": event.sample_tick,
+                "time": event.time_seconds,
+                "target_player_slot": event.target_player_slot,
+                "target_steam_id": event.target_steam_id,
+                "target_player_id": event.target_player_id,
+                "target_player_name": player_name,
+                "target_hero_name": event.target_hero_name,
+                "target_is_radiant": event.target_is_radiant,
+                "target_position": [event.target_x, event.target_y, event.target_z],
+                "hidden_seconds": event.hidden_seconds,
+                "visible_seconds": credit.visible_seconds,
+                "lost_position":
+                    [credit.lost_x, credit.lost_y, credit.lost_z] if credit.lost_x is not None else None,
+                "route": routes.get((event.id, credit.ward_id), []),
+                "credit": credit.credit,
+            }
+            for event, credit, player_name in rows
+        ],
+    }
 
 
 def integer_list(filters: Any, name: str) -> list[int]:
@@ -157,7 +254,20 @@ def ward_query():
             Ward.scouting_version,
             Ward.scouting_tau_seconds,
             Ward.scouting_complete,
-            Ward.measurement,
+            Ward.measurement_version,
+            Ward.measurement_revision,
+            Ward.added_vision_seconds,
+            Ward.fresh_sightings,
+            Ward.fresh_sighting_threshold_seconds,
+            Ward.vision_measured_seconds,
+            Ward.vision_possible_seconds,
+            Ward.vision_coverage,
+            Ward.placed_at_seconds,
+            Ward.ended_at_seconds,
+            Ward.outcome,
+            Ward.outcome_reason,
+            Ward.vision_complete,
+            Ward.measurement_evidence,
             Match.duration.label("match_duration"),
             Match.game_version,
             League.map_asset_version,
@@ -233,10 +343,20 @@ def apply_category_filters(query, filters: dict[str, Any], team_won):
         query = query.where(Ward.is_obs.is_(ward_type == "observer"))
 
     outcome = filters.get("outcome", "all")
-    if outcome not in ("all", "destroyed", "survived"):
-        raise BadRequest("outcome must be all, destroyed, or survived")
-    if outcome in ("destroyed", "survived"):
-        query = query.where(Ward.is_destroyed.is_(outcome == "destroyed"))
+    valid_outcomes = (
+        "all",
+        "dewarded",
+        "expired",
+        "allied_removed",
+        "match_ended",
+        "unresolved_removal",
+    )
+    if outcome not in valid_outcomes:
+        raise BadRequest(f"outcome must be one of {', '.join(valid_outcomes)}")
+    if outcome == "unresolved_removal":
+        query = query.where(Ward.outcome.in_(("unknown", "replay_ended")))
+    elif outcome != "all":
+        query = query.where(Ward.outcome == outcome)
 
     return query
 
@@ -277,6 +397,8 @@ def apply_range_filters(query, filters: dict[str, Any]):
 
 def apply_vision_filters(query, filters: dict[str, Any]):
     ranges = (
+        ("added vision", Ward.added_vision_seconds, "added_vision_seconds"),
+        ("fresh sightings", Ward.fresh_sightings, "fresh_sightings"),
         ("scouting score", Ward.scouting_score, "scouting_score"),
         ("enemy hero vision", Ward.enemy_hero_vision_seconds, "enemy_hero_vision_seconds"),
         (

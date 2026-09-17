@@ -2,22 +2,74 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 
 from ..extensions import db
-from ..models import League, Match, Player, Team, Ward, players_matches
+from ..models import (
+    FreshSightingEvent,
+    FreshSightingRoutePoint,
+    League,
+    Match,
+    Player,
+    Team,
+    Ward,
+    WardFreshSightingCredit,
+    players_matches,
+)
 
 logger = logging.getLogger(__name__)
 
 ParsedReplay = tuple[int, dict[str, Any], list[dict[str, Any]]]
 
 
+def _account_id(steam_id: object) -> int | None:
+    try:
+        value = int(steam_id)
+    except (TypeError, ValueError):
+        return None
+
+    universe = (value >> 56) & 0xFF
+    account_type = (value >> 52) & 0xF
+    instance = (value >> 32) & 0xFFFFF
+    account_id = value & 0xFFFFFFFF
+
+    if universe != 1 or account_type != 1 or instance != 1 or account_id == 0:
+        return None
+
+    return account_id
+
+
+def _measurement_values(measurement: dict[str, Any] | None) -> dict[str, Any]:
+    if measurement is None:
+        return {}
+
+    return {
+        "measurement_version": measurement.get("version"),
+        "measurement_revision": measurement.get("revision"),
+        "added_vision_seconds": measurement.get("added_vision_seconds"),
+        "fresh_sightings": measurement.get("fresh_sightings"),
+        "fresh_sighting_threshold_seconds": measurement.get("fresh_sighting_threshold_seconds"),
+        "vision_measured_seconds": measurement.get("vision_measured_seconds"),
+        "vision_possible_seconds": measurement.get("vision_possible_seconds"),
+        "vision_coverage": measurement.get("vision_coverage"),
+        "placed_at_seconds": measurement.get("placed_at_seconds"),
+        "ended_at_seconds": measurement.get("ended_at_seconds"),
+        "outcome": measurement.get("outcome"),
+        "outcome_reason": measurement.get("outcome_reason"),
+        "vision_complete": measurement.get("vision_complete"),
+        "measurement_evidence": {
+            "sightings": measurement.get("sightings", []),
+        },
+    }
+
+
 def persist_parsed_replay(result: ParsedReplay) -> bool:
     match_id, match_data, ward_results = result
     try:
         wards = []
+        parsed_wards = []
         for raw_ward_data in ward_results:
             ward_data = raw_ward_data.copy()
             npc_killed = ward_data.get("npc_killed")
@@ -29,8 +81,7 @@ def persist_parsed_replay(result: ParsedReplay) -> bool:
             if ward_data["player_destroyed_steam_id"] is not None:
                 ward_data["player_destroyed_steam_id"] -= 76561197960265728
 
-            wards.append(
-                {
+            values = {
                     "match_id": match_id,
                     "is_obs": ward_data["is_obs"],
                     "is_radiant": ward_data["is_radiant"],
@@ -56,10 +107,12 @@ def persist_parsed_replay(result: ParsedReplay) -> bool:
                     "scouting_version": ward_data.get("scouting_version"),
                     "scouting_tau_seconds": ward_data.get("scouting_tau_seconds"),
                     "scouting_complete": ward_data.get("scouting_complete"),
-                    "measurement": ward_data.get("measurement"),
                     "npc_killed": ward_data["npc_killed"],
                 }
-            )
+            measurement = ward_data.get("measurement")
+            values.update(_measurement_values(measurement))
+            wards.append(values)
+            parsed_wards.append({**values, "measurement": measurement})
 
         if match_data["league"] is not None:
             league = db.session.get(League, int(match_data["league"]))
@@ -79,15 +132,17 @@ def persist_parsed_replay(result: ParsedReplay) -> bool:
             )
             db.session.add(match)
             apply_match_team_data(match, match_data)
-            _attach_players(match, match_data, wards)
+            _attach_players(match, match_data, parsed_wards)
             db.session.flush()
 
             if wards:
                 db.session.execute(insert(Ward).values(wards))
+                persisted_wards = db.session.execute(select(Ward).where(Ward.match_id == match_id)).scalars().all()
+                _replace_fresh_sightings(match_id, _match_parsed_wards(match_id, persisted_wards, parsed_wards))
             else:
                 logger.warning("Parsed match %s contains no wards", match_id)
         else:
-            updated = _update_existing_measurements(match_id, wards)
+            updated = _update_existing_measurements(match_id, parsed_wards)
             logger.info("Match %s is already parsed; updated %s measurements", match_id, updated)
 
         db.session.commit()
@@ -107,25 +162,124 @@ def _ward_signature(ward: Ward | dict[str, Any]) -> tuple[object, ...]:
     return tuple(getattr(ward, name) for name in names)
 
 
-def _update_existing_measurements(match_id: int, parsed_wards: list[dict[str, Any]]) -> int:
+def _match_parsed_wards(
+    match_id: int,
+    existing: list[Ward],
+    parsed_wards: list[dict[str, Any]],
+) -> list[tuple[Ward, dict[str, Any]]]:
     candidates = [ward for ward in parsed_wards if ward.get("measurement") is not None]
-    if not candidates:
-        return 0
-
-    existing = db.session.execute(select(Ward).where(Ward.match_id == match_id)).scalars().all()
     by_signature: dict[tuple[object, ...], list[Ward]] = {}
     for ward in existing:
         by_signature.setdefault(_ward_signature(ward), []).append(ward)
 
-    matches: list[tuple[Ward, Any]] = []
+    matches: list[tuple[Ward, dict[str, Any]]] = []
     for candidate in candidates:
         rows = by_signature.get(_ward_signature(candidate), [])
         if len(rows) != 1:
             raise ValueError(f"Measurement backfill for match {match_id} is ambiguous or incomplete")
-        matches.append((rows.pop(), candidate["measurement"]))
+        matches.append((rows.pop(), candidate))
 
-    for ward, measurement in matches:
-        ward.measurement = measurement
+    return matches
+
+
+def _replace_fresh_sightings(match_id: int, matches: list[tuple[Ward, dict[str, Any]]]) -> None:
+    event_ids = select(FreshSightingEvent.id).where(FreshSightingEvent.match_id == match_id)
+    db.session.execute(delete(FreshSightingRoutePoint).where(FreshSightingRoutePoint.event_id.in_(event_ids)))
+    db.session.execute(delete(WardFreshSightingCredit).where(WardFreshSightingCredit.event_id.in_(event_ids)))
+    db.session.execute(delete(FreshSightingEvent).where(FreshSightingEvent.match_id == match_id))
+
+    target_sides: dict[int, bool] = {}
+    for _, candidate in matches:
+        for sighting in (candidate.get("measurement") or {}).get("sightings", []):
+            player_id = _account_id(sighting.get("target_steam_id"))
+            if player_id is not None:
+                target_sides[player_id] = bool(sighting["target_is_radiant"])
+
+    existing_player_ids = set(
+        db.session.execute(select(Player.id).where(Player.id.in_(target_sides))).scalars().all()
+    )
+    db.session.add_all(Player(id=player_id) for player_id in target_sides.keys() - existing_player_ids)
+    db.session.flush()
+    if target_sides:
+        db.session.execute(
+            insert(players_matches)
+            .values(
+                [
+                    {"player_id": player_id, "match_id": match_id, "is_radiant": is_radiant}
+                    for player_id, is_radiant in target_sides.items()
+                ]
+            )
+            .on_conflict_do_nothing()
+        )
+
+    events: dict[tuple[int, int], FreshSightingEvent] = {}
+    credits: list[tuple[FreshSightingEvent, int, dict[str, Any]]] = []
+    for ward, candidate in matches:
+        measurement = candidate.get("measurement") or {}
+        for sighting in measurement.get("sightings", []):
+            key = (int(sighting["sample_tick"]), int(sighting["target_player_slot"]))
+            event = events.get(key)
+            if event is None:
+                position = sighting["target_position"]
+                steam_id = sighting.get("target_steam_id")
+                event = FreshSightingEvent(
+                    match_id=match_id,
+                    sample_tick=key[0],
+                    time_seconds=float(sighting["time"]),
+                    target_player_slot=key[1],
+                    target_steam_id=str(steam_id) if steam_id is not None else None,
+                    target_player_id=_account_id(steam_id),
+                    target_hero_name=str(sighting["target_hero_name"]),
+                    target_is_radiant=bool(sighting["target_is_radiant"]),
+                    target_x=float(position[0]),
+                    target_y=float(position[1]),
+                    target_z=float(position[2]),
+                    hidden_seconds=float(sighting["hidden_seconds"]),
+                )
+                db.session.add(event)
+                events[key] = event
+
+            credits.append((event, ward.id, sighting))
+
+    db.session.flush()
+    db.session.add_all(
+        WardFreshSightingCredit(
+            event_id=event.id,
+            ward_id=ward_id,
+            credit=float(sighting["credit"]),
+            visible_seconds=sighting.get("visible_seconds"),
+            lost_x=(sighting.get("lost_position") or [None, None, None])[0],
+            lost_y=(sighting.get("lost_position") or [None, None, None])[1],
+            lost_z=(sighting.get("lost_position") or [None, None, None])[2],
+        )
+        for event, ward_id, sighting in credits
+    )
+    db.session.flush()
+    db.session.add_all(
+        FreshSightingRoutePoint(
+            event_id=event.id,
+            ward_id=ward_id,
+            sequence=sequence,
+            time_seconds=float(point["time"]),
+            x=float(point["position"][0]),
+            y=float(point["position"][1]),
+            z=float(point["position"][2]),
+        )
+        for event, ward_id, sighting in credits
+        for sequence, point in enumerate(sighting.get("route", []))
+    )
+
+
+def _update_existing_measurements(match_id: int, parsed_wards: list[dict[str, Any]]) -> int:
+    existing = db.session.execute(select(Ward).where(Ward.match_id == match_id)).scalars().all()
+    matches = _match_parsed_wards(match_id, existing, parsed_wards)
+
+    for ward, candidate in matches:
+        measurement = _measurement_values(candidate["measurement"])
+        for name, value in measurement.items():
+            setattr(ward, name, value)
+
+    _replace_fresh_sightings(match_id, matches)
 
     return len(matches)
 
@@ -166,7 +320,13 @@ def _attach_players(match: Match, match_data: dict[str, Any], wards: list[dict[s
         if ward["player_destroyed_id"] is not None and ward["is_radiant"] is not None:
             player_sides.setdefault(ward["player_destroyed_id"], not ward["is_radiant"])
 
+        for sighting in (ward.get("measurement") or {}).get("sightings", []):
+            player_id = _account_id(sighting.get("target_steam_id"))
+            if player_id is not None:
+                player_sides.setdefault(player_id, bool(sighting["target_is_radiant"]))
+
     player_ids = set(player_names)
+    player_ids.update(player_sides)
     player_ids.update(ward["player_placed_id"] for ward in wards if ward["player_placed_id"] is not None)
     player_ids.update(ward["player_destroyed_id"] for ward in wards if ward["player_destroyed_id"] is not None)
 

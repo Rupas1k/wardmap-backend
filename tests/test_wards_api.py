@@ -5,7 +5,16 @@ from dota2wardmap.api.players import bp as players_bp
 from dota2wardmap.api.teams import bp as teams_bp
 from dota2wardmap.api.wards import MAX_FILTER_IDS, bp
 from dota2wardmap.extensions import db
-from dota2wardmap.models import League, Match, Player, Team, Ward
+from dota2wardmap.models import (
+    FreshSightingEvent,
+    FreshSightingRoutePoint,
+    League,
+    Match,
+    Player,
+    Team,
+    Ward,
+    WardFreshSightingCredit,
+)
 
 
 def test_query_wards_applies_dataset_filters():
@@ -61,6 +70,9 @@ def test_query_wards_applies_dataset_filters():
                 scouting_tracking_seconds=75.5,
                 scouting_discovery_seconds=30.25,
                 scouting_score=105.75,
+                added_vision_seconds=42.5,
+                fresh_sightings=2.0,
+                outcome="expired",
                 x_pos=10,
                 y_pos=20,
                 z_pos=30,
@@ -79,13 +91,17 @@ def test_query_wards_applies_dataset_filters():
                     "team_result": "won",
                     "side": "radiant",
                     "ward_type": "observer",
-                    "outcome": "survived",
+                    "outcome": "expired",
                     "minimum_game_minute": 5,
                     "maximum_game_minute": 15,
                     "minimum_match_duration": 30,
                     "maximum_match_duration": 60,
                     "minimum_ward_lifetime": 300,
                     "maximum_ward_lifetime": 400,
+                    "minimum_added_vision_seconds": 42,
+                    "maximum_added_vision_seconds": 43,
+                    "minimum_fresh_sightings": 2,
+                    "maximum_fresh_sightings": 2,
                     "minimum_enemy_hero_vision_seconds": 120,
                     "maximum_enemy_hero_vision_seconds": 121,
                     "minimum_unique_enemy_hero_vision_seconds": 80,
@@ -317,3 +333,80 @@ def test_query_wards_rejects_time_before_pregame_limit():
         )
 
     assert response.status_code == 400
+
+
+def test_ward_evidence_returns_normalized_sightings():
+    app = Flask(__name__)
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
+    db.init_app(app)
+    app.register_blueprint(bp)
+
+    with app.app_context():
+        db.create_all()
+        db.session.add(Match(id=300, duration=2400))
+        player = Player(id=222, name="Support")
+        ward = Ward(
+            match_id=300,
+            is_obs=True,
+            is_radiant=True,
+            is_destroyed=False,
+            is_post_game=False,
+            time_placed=100,
+            duration=360,
+            x_pos=10,
+            y_pos=20,
+            z_pos=30,
+        )
+        event = FreshSightingEvent(
+            match_id=300,
+            sample_tick=1234,
+            time_seconds=125.5,
+            target_player_slot=6,
+            target_steam_id="76561197960265950",
+            target_player_id=222,
+            target_hero_name="CDOTA_Unit_Hero_Axe",
+            target_is_radiant=False,
+            target_x=100,
+            target_y=200,
+            target_z=300,
+            hidden_seconds=54,
+        )
+        db.session.add_all([player, ward, event])
+        db.session.flush()
+        db.session.add(
+            WardFreshSightingCredit(
+                event_id=event.id,
+                ward_id=ward.id,
+                credit=0.5,
+                visible_seconds=8.4,
+                lost_x=130,
+                lost_y=240,
+                lost_z=300,
+            )
+        )
+        db.session.add(
+            FreshSightingRoutePoint(
+                event_id=event.id,
+                ward_id=ward.id,
+                sequence=0,
+                time_seconds=125.5,
+                x=100,
+                y=200,
+                z=300,
+            )
+        )
+        db.session.commit()
+
+        with app.test_client() as client:
+            response = client.get(f"/wards/{ward.id}/evidence")
+
+    assert response.status_code == 200
+    sighting = response.get_json()["sightings"][0]
+    assert sighting["target_player_name"] == "Support"
+    assert sighting["target_steam_id"] == "76561197960265950"
+    assert sighting["target_hero_name"] == "CDOTA_Unit_Hero_Axe"
+    assert sighting["target_position"] == [100.0, 200.0, 300.0]
+    assert sighting["visible_seconds"] == 8.4
+    assert sighting["lost_position"] == [130.0, 240.0, 300.0]
+    assert sighting["route"] == [{"position": [100.0, 200.0, 300.0], "time": 125.5}]
+    assert sighting["credit"] == 0.5

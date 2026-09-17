@@ -5,11 +5,33 @@ from sqlalchemy import select
 
 from dota2wardmap import create_worker_app
 from dota2wardmap.extensions import db
-from dota2wardmap.models import League, Match, Player, Team, Ward
+from dota2wardmap.models import (
+    FreshSightingEvent,
+    FreshSightingRoutePoint,
+    League,
+    Match,
+    Player,
+    Team,
+    Ward,
+    WardFreshSightingCredit,
+)
 from dota2wardmap.replay.download import decompress_replay_archive as _decompress_replay_archive
 from dota2wardmap.replay.download import get_replay
-from dota2wardmap.replay.persistence import persist_parsed_replay
+from dota2wardmap.replay.persistence import _measurement_values, persist_parsed_replay
 from dota2wardmap.settings import get_settings
+
+
+def test_measurement_evidence_keeps_only_fresh_sightings():
+    sighting = {"time": 42.0, "hero": 7}
+    values = _measurement_values(
+        {
+            "version": 2,
+            "intervals": [{"start": 1.0, "end": 2.0}],
+            "sightings": [sighting],
+        }
+    )
+
+    assert values["measurement_evidence"] == {"sightings": [sighting]}
 
 
 def test_worker_app_has_connections_without_api_routes(monkeypatch):
@@ -126,6 +148,30 @@ def test_persist_parsed_replay_persists_opendota_participants():
         "scouting_version": 1,
         "scouting_tau_seconds": 10.0,
         "scouting_complete": True,
+        "measurement": {
+            "version": 2,
+            "revision": 1,
+            "sightings": [
+                {
+                    "sample_tick": 3600,
+                    "time": 120.0,
+                    "target_player_slot": 6,
+                    "target_steam_id": "76561197960265950",
+                    "target_hero_name": "CDOTA_Unit_Hero_Axe",
+                    "target_is_radiant": False,
+                    "target_position": [1200.5, 3400.25, 256.0],
+                    "hidden_seconds": 12.0,
+                    "visible_seconds": 8.4,
+                    "lost_position": [1500.0, 3600.0, 256.0],
+                    "route": [
+                        {"time": 120.0, "position": [1200.5, 3400.25, 256.0]},
+                        {"time": 128.2, "position": [1500.0, 3600.0, 256.0]},
+                    ],
+                    "observer_handles": [42],
+                    "credit": 1.0,
+                }
+            ],
+        },
     }
 
     with app.app_context():
@@ -137,6 +183,11 @@ def test_persist_parsed_replay_persists_opendota_participants():
         league = db.session.get(League, 19892)
         ward = db.session.execute(select(Ward)).scalar_one()
         radiant_team = db.session.get(Team, 10)
+        sighting = db.session.execute(select(FreshSightingEvent)).scalar_one()
+        sighting_credit = db.session.execute(select(WardFreshSightingCredit)).scalar_one()
+        route = db.session.execute(
+            select(FreshSightingRoutePoint).order_by(FreshSightingRoutePoint.sequence)
+        ).scalars().all()
 
         assert player is not None and player.name == "SumaiL-"
         assert match is not None and player in match.players
@@ -153,3 +204,15 @@ def test_persist_parsed_replay_persists_opendota_participants():
         assert radiant_team.metadata_updated_at is not None
         assert match.radiant_team_id == 10 and match.dire_team_id == 20
         assert match.radiant_win is True
+        assert sighting.target_player_slot == 6
+        assert sighting.target_steam_id == "76561197960265950"
+        assert sighting.target_player_id == 222
+        assert sighting.target_hero_name == "CDOTA_Unit_Hero_Axe"
+        assert sighting.target_x == 1200.5
+        assert sighting_credit.visible_seconds == 8.4
+        assert sighting_credit.lost_x == 1500.0
+        assert [point.time_seconds for point in route] == [120.0, 128.2]
+        assert route[-1].x == 1500.0
+        assert route[-1].ward_id == ward.id
+        assert sighting_credit.ward_id == ward.id
+        assert sighting_credit.credit == 1.0
