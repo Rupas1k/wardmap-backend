@@ -28,6 +28,7 @@ struct ResultEvidence {
     placed_at_seconds: f64,
     ended_at_seconds: f64,
     outcome: &'static str,
+    outcome_reason: &'static str,
 }
 
 #[derive(Default)]
@@ -60,6 +61,7 @@ impl App {
             let duration = (((tick - entry.placed_tick) as f32) / 30.0).round() as i32;
             let time_placed = (entry.placed_tick as f32 / 30.0 - start_time).round() as i32;
             let hero_placed = ctx.entities().get_by_handle(entry.hero_handle)?.class().name();
+
             let vision_metrics = self.vision.borrow().ward_metrics(handle);
             let player_destroyed_steam_id = match &event {
                 WardEvent::Killed(killer) => self
@@ -70,33 +72,32 @@ impl App {
                     .map(|player| player.borrow().id),
                 _ => None,
             };
-            let outcome = match &event {
+
+            let (outcome, outcome_reason) = match &event {
                 WardEvent::Killed(killer) => self
                     .players
                     .borrow()
                     .hero_to_player
                     .get(killer)
                     .map(|player| player.borrow().team == if entry.is_radiant { 2 } else { 3 })
-                    .map_or(
-                        "unknown_removal",
-                        |allied| {
-                            if allied {
-                                "allied_removed"
-                            } else {
-                                "enemy_destroyed"
-                            }
-                        },
-                    ),
-                WardEvent::Expired if post_game => "match_end",
+                    .map_or(("unknown", "unknown_killer"), |allied| {
+                        if allied {
+                            ("allied_removed", "combat_log")
+                        } else {
+                            ("dewarded", "combat_log")
+                        }
+                    }),
+                WardEvent::Expired if post_game => ("match_ended", "match_end"),
                 WardEvent::Expired
                     if ((tick - entry.placed_tick) as f64 / 30.0 - if entry.is_observer { 360.0 } else { 420.0 }).abs()
                         <= 0.25 =>
                 {
-                    "inferred_expiry"
+                    ("expired", "expected_lifetime")
                 }
-                WardEvent::Expired => "unknown_removal",
-                WardEvent::Placed => "unknown",
+                WardEvent::Expired => ("unknown", "entity_removal"),
+                WardEvent::Placed => ("unknown", "entity_event"),
             };
+
             let npc_killed = match &event {
                 WardEvent::Killed(killer) => Some(killer.to_string()),
                 _ => None,
@@ -140,11 +141,13 @@ impl App {
                 scouting_complete: None,
                 measurement_json: None,
             });
+
             self.result_evidence.push(ResultEvidence {
                 handle,
                 placed_at_seconds: entry.placed_tick as f64 / 30.0 - start_time as f64,
                 ended_at_seconds: tick as f64 / 30.0 - start_time as f64,
                 outcome,
+                outcome_reason,
             });
         }
 
@@ -269,7 +272,6 @@ pub fn parse_replay(data: &[u8]) -> anyhow::Result<Replay> {
         let object = measurement
             .as_object_mut()
             .ok_or_else(|| anyhow!("Ward measurement did not serialize as an object"))?;
-        object.insert("map_asset_version".to_owned(), 2.into());
         object.insert("revision".to_owned(), 1.into());
         if let Some(intervals) = object.get_mut("intervals").and_then(serde_json::Value::as_array_mut) {
             let start = app.game_time.borrow().start_time()? as f64;
@@ -298,15 +300,14 @@ pub fn parse_replay(data: &[u8]) -> anyhow::Result<Replay> {
         if output.is_obs {
             let eligible = (ended_at - evidence.placed_at_seconds).max(0.0) * 5.0;
             let known = object
-                .get("known_target_seconds")
+                .get("vision_measured_seconds")
                 .and_then(serde_json::Value::as_f64)
                 .unwrap_or(0.0)
                 .min(eligible);
-            object.insert("eligible_target_seconds".to_owned(), eligible.into());
-            object.insert("known_target_seconds".to_owned(), known.into());
-            object.insert("missing_target_seconds".to_owned(), (eligible - known).into());
+            object.insert("vision_possible_seconds".to_owned(), eligible.into());
+            object.insert("vision_measured_seconds".to_owned(), known.into());
             object.insert(
-                "coverage".to_owned(),
+                "vision_coverage".to_owned(),
                 if eligible > 0.0 {
                     (known / eligible).into()
                 } else {
@@ -320,26 +321,25 @@ pub fn parse_replay(data: &[u8]) -> anyhow::Result<Replay> {
                 && other.is_radiant == output.is_radiant
                 && (other_evidence.ended_at_seconds - evidence.ended_at_seconds).abs() <= 0.5
         });
-        let outcome = if metadata.game_duration_seconds.is_none() && evidence.outcome == "match_end" {
-            "replay_truncated"
+        let (outcome, outcome_reason) = if metadata.game_duration_seconds.is_none() && evidence.outcome == "match_ended" {
+            ("replay_ended", "replay_end")
         } else if metadata
             .game_duration_seconds
             .is_some_and(|game_end| evidence.ended_at_seconds > f64::from(game_end))
         {
-            "match_end"
+            ("match_ended", "match_end")
         } else if ambiguous {
-            "unknown_removal"
+            ("unknown", "ambiguous_removal")
         } else {
-            evidence.outcome
+            (evidence.outcome, evidence.outcome_reason)
         };
         object.insert("outcome".to_owned(), outcome.into());
-        object.insert("outcome_reason".to_owned(), output.event.clone().into());
-        object.insert("vision_supported".to_owned(), output.is_obs.into());
+        object.insert("outcome_reason".to_owned(), outcome_reason.into());
         object.insert(
-            "complete".to_owned(),
+            "vision_complete".to_owned(),
             (output.is_obs
                 && object
-                    .get("coverage")
+                    .get("vision_coverage")
                     .and_then(serde_json::Value::as_f64)
                     .is_some_and(|coverage| coverage >= 1.0 - 1e-9))
             .into(),
@@ -347,7 +347,7 @@ pub fn parse_replay(data: &[u8]) -> anyhow::Result<Replay> {
         if !output.is_obs {
             object.insert("added_vision_seconds".to_owned(), serde_json::Value::Null);
             object.insert("fresh_sightings".to_owned(), serde_json::Value::Null);
-            object.insert("coverage".to_owned(), serde_json::Value::Null);
+            object.insert("vision_coverage".to_owned(), serde_json::Value::Null);
         }
         output.measurement_json = Some(serde_json::to_string(&measurement)?);
     }

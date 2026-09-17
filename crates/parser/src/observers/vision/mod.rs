@@ -7,7 +7,7 @@ use source2_demo::proto::DotaCombatlogTypes;
 
 mod grid;
 use grid::VisionGrid;
-mod metrics;
+pub(crate) mod metrics;
 use metrics::{Observation, PlayerObservation, Sight, VisionMetrics, SAMPLE_INTERVAL_TICKS};
 pub use metrics::{WardMeasurement, WardVisionMetrics, DISCOVERY_TAU_SECONDS, SCOUTING_VERSION};
 
@@ -27,12 +27,12 @@ pub struct Vision {
     metrics: VisionMetrics,
     measured_metrics: VisionMetrics,
     measurement_finished: bool,
-    invisible_modifiers: HashSet<(u64, String)>,
+    invisible_modifiers: HashSet<(u8, String)>,
     providers_changed: bool,
     previous_sample_tick: Option<i32>,
     active_observers: HashSet<u32>,
     incomplete_wards: HashSet<u32>,
-    smoked_heroes: HashSet<u64>,
+    smoked_heroes: HashSet<u8>,
 }
 
 impl Vision {
@@ -69,6 +69,7 @@ impl Vision {
             .filter_map(|handle| ctx.entities().get_by_handle(*handle as usize).ok())
             .filter_map(|entity| ActiveProvider::from_entity(entity, is_day))
             .collect::<Vec<_>>();
+
         let active_observers = self
             .provider_handles
             .iter()
@@ -86,8 +87,11 @@ impl Vision {
             let player = player.borrow();
             let Ok(hero) = ctx.entities().get_by_handle(player.handle) else {
                 observations.push(PlayerObservation {
-                    id: player.id,
+                    slot: player.slot,
+                    steam_id: (player.id != 0).then_some(player.id),
+                    hero_name: String::new(),
                     team: player.team,
+                    position: None,
                     state: Observation::Unknown,
                 });
                 continue;
@@ -99,16 +103,16 @@ impl Vision {
             let mut ward_providers = Vec::new();
             let mut has_non_ward_provider = false;
 
-            if is_alive && !self.smoked_heroes.contains(&player.id) {
-                if let Some(target_position) = position {
-                    for provider in providers.iter().filter(|provider| provider.team == enemy_team) {
-                        if self.grid.can_see(provider.position, target_position, provider.range) {
-                            if provider.is_observer {
-                                ward_providers.push(provider.handle);
-                            } else {
-                                has_non_ward_provider = true;
-                            }
-                        }
+            if let Some(target_position) = position.filter(|_| is_alive && !self.smoked_heroes.contains(&player.slot)) {
+                for provider in providers.iter().filter(|provider| provider.team == enemy_team) {
+                    if !self.grid.can_see(provider.position, target_position, provider.range) {
+                        continue;
+                    }
+
+                    if provider.is_observer {
+                        ward_providers.push(provider.handle);
+                    } else {
+                        has_non_ward_provider = true;
                     }
                 }
             }
@@ -126,21 +130,27 @@ impl Vision {
                     non_ward: has_non_ward_provider,
                 })
             };
+
             observations.push(PlayerObservation {
-                id: player.id,
+                slot: player.slot,
+                steam_id: (player.id != 0).then_some(player.id),
+                hero_name: hero.class().name().to_owned(),
                 team: player.team,
+                position,
                 state: observation,
             });
         }
+
         let has_gap = self
             .previous_sample_tick
             .is_some_and(|previous| tick < previous || tick - previous > SAMPLE_INTERVAL_TICKS);
-        if has_gap
+        let measurement_is_incomplete = has_gap
             || !providers_known
             || observations
                 .iter()
-                .any(|observation| matches!(observation.state, Observation::Unknown))
-        {
+                .any(|observation| matches!(observation.state, Observation::Unknown));
+
+        if measurement_is_incomplete {
             self.incomplete_wards.extend(&self.active_observers);
             self.incomplete_wards.extend(&active_observers);
         }
@@ -152,18 +162,12 @@ impl Vision {
             .map(|provider| (provider.handle, provider.team))
             .collect::<Vec<_>>();
         let time = tick as f64 / 30.0;
-        self.metrics.sample(time, observations.clone(), &active_wards);
+
+        self.metrics.sample_at_tick(tick, time, observations.clone(), &active_wards);
 
         if !self.measurement_finished {
             for observation in &mut observations {
-                let unsupported_body = players.players.iter().any(|player| {
-                    let player = player.borrow();
-                    player.id == observation.id
-                        && ctx.entities().get_by_handle(player.handle).is_ok_and(|hero| {
-                            matches!(hero.class().name(), "CDOTA_Unit_Hero_Meepo" | "CDOTA_Unit_Hero_ArcWarden")
-                        })
-                });
-                if unsupported_body || self.invisible_modifiers.iter().any(|(id, _)| *id == observation.id) {
+                if self.invisible_modifiers.iter().any(|(slot, _)| *slot == observation.slot) {
                     observation.state = Observation::Unknown;
                 }
             }
@@ -175,7 +179,9 @@ impl Vision {
                 .filter(|end| end.is_finite() && *end > 0.0)
                 .map(f64::from);
             let measurement_time = end.map_or(time, |end| time.min(end));
-            self.measured_metrics.sample(measurement_time, observations, &active_wards);
+
+            self.measured_metrics
+                .sample_at_tick(tick, measurement_time, observations, &active_wards);
             self.measurement_finished = end.is_some_and(|end| time >= end);
         }
     }
@@ -275,6 +281,7 @@ impl Vision {
 
         let modifier = combat_log.inflictor_name().unwrap_or("");
         let smoke = modifier == "modifier_smoke_of_deceit";
+
         if !smoke && combat_log.log().invisibility_modifier != Some(true) {
             return Ok(());
         }
@@ -287,7 +294,7 @@ impl Vision {
             return Ok(());
         };
 
-        let player_id = player.borrow().id;
+        let player_id = player.borrow().slot;
 
         if !smoke {
             if combat_log.log().is_target_illusion != Some(true) {
@@ -312,7 +319,6 @@ impl Vision {
         Ok(())
     }
 }
-
 struct ActiveProvider {
     handle: u32,
     team: i32,
@@ -372,8 +378,10 @@ fn is_provider_candidate(entity: &Entity) -> bool {
 }
 
 fn is_alive(entity: &Entity) -> bool {
-    try_property!(entity, i32, "m_lifeState").is_none_or(|state| state == 0)
-        && try_property!(entity, i32, "m_iHealth").is_none_or(|health| health > 0)
+    let is_alive = try_property!(entity, i32, "m_lifeState").is_none_or(|state| state == 0);
+    let has_health = try_property!(entity, i32, "m_iHealth").is_none_or(|health| health > 0);
+
+    is_alive && has_health
 }
 
 fn entity_position(entity: &Entity) -> Option<[f32; 3]> {

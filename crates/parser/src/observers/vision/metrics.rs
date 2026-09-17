@@ -8,6 +8,14 @@ pub const SAMPLE_INTERVAL_TICKS: i32 = 6;
 pub const MEASUREMENT_VERSION: u16 = 2;
 pub const FRESH_SIGHTING_THRESHOLD_SECONDS: f64 = 5.0;
 const MAX_INTERVAL_SECONDS: f64 = SAMPLE_INTERVAL_TICKS as f64 / 30.0 + 1e-6;
+const ROUTE_SAMPLE_SECONDS: f64 = 0.5;
+const ROUTE_SAMPLE_DISTANCE: f32 = 128.0;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SightingRoutePoint {
+    pub time: f64,
+    pub position: [f32; 3],
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct WardVisionMetrics {
@@ -22,9 +30,17 @@ pub struct WardVisionMetrics {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SightingEvidence {
+    pub sample_tick: i32,
     pub time: f64,
-    pub target_player: String,
+    pub target_player_slot: u8,
+    pub target_steam_id: Option<String>,
+    pub target_hero_name: String,
+    pub target_is_radiant: bool,
+    pub target_position: [f32; 3],
     pub hidden_seconds: f64,
+    pub visible_seconds: Option<f64>,
+    pub lost_position: Option<[f32; 3]>,
+    pub route: Vec<SightingRoutePoint>,
     pub observer_handles: Vec<u32>,
     pub credit: f64,
 }
@@ -44,16 +60,12 @@ pub struct WardMeasurement {
     pub intervals: Vec<VisionInterval>,
     pub sightings: Vec<SightingEvidence>,
     pub version: u16,
-    pub model: &'static str,
-    pub estimated: bool,
     pub added_vision_seconds: f64,
     pub fresh_sightings: f64,
     pub fresh_sighting_threshold_seconds: f64,
-    pub eligible_target_seconds: f64,
-    pub known_target_seconds: f64,
-    pub missing_target_seconds: f64,
-    pub coverage: Option<f64>,
-    pub model_limitations: [&'static str; 4],
+    pub vision_possible_seconds: f64,
+    pub vision_measured_seconds: f64,
+    pub vision_coverage: Option<f64>,
 }
 
 impl WardVisionMetrics {
@@ -65,10 +77,10 @@ impl WardVisionMetrics {
 #[derive(Default)]
 struct WardAccumulator {
     intervals: Vec<VisionInterval>,
-    last_interval: HashMap<u64, usize>,
+    last_interval: HashMap<u8, usize>,
     sightings: Vec<SightingEvidence>,
     metrics: WardVisionMetrics,
-    heroes: HashSet<u64>,
+    heroes: HashSet<u8>,
     fresh_sightings: f64,
     eligible_target_seconds: f64,
     known_target_seconds: f64,
@@ -95,23 +107,28 @@ pub enum Observation {
 
 #[derive(Clone)]
 pub struct PlayerObservation {
-    pub id: u64,
+    pub slot: u8,
+    pub steam_id: Option<u64>,
+    pub hero_name: String,
     pub team: i32,
+    pub position: Option<[f32; 3]>,
     pub state: Observation,
 }
 
 struct TargetState {
     sight: Sight,
     unseen_since: Option<f64>,
+    position: Option<[f32; 3]>,
 }
 
 #[derive(Default)]
 pub struct VisionMetrics {
     previous_time: Option<f64>,
-    targets: HashMap<u64, TargetState>,
+    targets: HashMap<u8, TargetState>,
     wards: HashMap<u32, WardAccumulator>,
-    previous_known: HashSet<u64>,
+    previous_known: HashSet<u8>,
     previous_active: Vec<(u32, i32)>,
+    open_sightings: HashMap<(u8, u32), usize>,
 }
 
 impl VisionMetrics {
@@ -128,25 +145,27 @@ impl VisionMetrics {
             intervals: ward.map_or_else(Vec::new, |ward| ward.intervals.clone()),
             sightings: ward.map_or_else(Vec::new, |ward| ward.sightings.clone()),
             version: MEASUREMENT_VERSION,
-            model: "geometry-v2",
-            estimated: true,
             added_vision_seconds: ward.map_or(0.0, |ward| ward.metrics.scouting_tracking_seconds),
             fresh_sightings: ward.map_or(0.0, |ward| ward.fresh_sightings),
             fresh_sighting_threshold_seconds: FRESH_SIGHTING_THRESHOLD_SECONDS,
-            eligible_target_seconds: eligible,
-            known_target_seconds: known,
-            missing_target_seconds: (eligible - known).max(0.0),
-            coverage: (eligible > 0.0).then_some((known / eligible).clamp(0.0, 1.0)),
-            model_limitations: [
-                "static map and tree geometry",
-                "spell and flying vision are incomplete",
-                "local invisibility other than Smoke of Deceit is unsupported",
-                "Meepo and Arc Warden target bodies are unsupported and counted as unknown",
-            ],
+            vision_possible_seconds: eligible,
+            vision_measured_seconds: known,
+            vision_coverage: (eligible > 0.0).then_some((known / eligible).clamp(0.0, 1.0)),
         }
     }
 
-    pub fn sample(&mut self, time: f64, observations: Vec<PlayerObservation>, active_wards: &[(u32, i32)]) {
+    #[cfg(test)]
+    pub(crate) fn sample(&mut self, time: f64, observations: Vec<PlayerObservation>, active_wards: &[(u32, i32)]) {
+        self.sample_at_tick((time * 30.0).round() as i32, time, observations, active_wards);
+    }
+
+    pub fn sample_at_tick(
+        &mut self,
+        sample_tick: i32,
+        time: f64,
+        observations: Vec<PlayerObservation>,
+        active_wards: &[(u32, i32)],
+    ) {
         let elapsed = self.previous_time.map(|previous| time - previous);
         self.previous_time = Some(time);
 
@@ -155,6 +174,7 @@ impl VisionMetrics {
             _ => {
                 self.targets.clear();
                 self.previous_known.clear();
+                self.open_sightings.clear();
                 0.0
             }
         };
@@ -163,8 +183,11 @@ impl VisionMetrics {
         let previous_active = std::mem::replace(&mut self.previous_active, active_wards.to_vec());
 
         for observation in observations {
-            let player = observation.id;
+            let player = observation.slot;
+            let steam_id = observation.steam_id;
+            let hero_name = observation.hero_name;
             let team = observation.team;
+            let position = observation.position;
             let state = observation.state;
             let old = previous.remove(&player);
 
@@ -177,9 +200,12 @@ impl VisionMetrics {
                     }
                 }
             }
+
             if matches!(state, Observation::Unknown) {
+                self.open_sightings.retain(|(slot, _), _| *slot != player);
                 continue;
             }
+
             self.previous_known.insert(player);
 
             if let Some(old) = &old {
@@ -187,12 +213,24 @@ impl VisionMetrics {
             }
 
             let Observation::Alive(mut sight) = state else {
+                self.finish_missing_sightings(player, time, time - elapsed, old.as_ref().and_then(|old| old.position), &[]);
                 continue;
             };
+
             sight.wards.sort_unstable();
             sight.wards.dedup();
 
             let visible = sight.visible();
+
+            self.finish_missing_sightings(
+                player,
+                time,
+                time - elapsed,
+                old.as_ref().and_then(|old| old.position),
+                &sight.wards,
+            );
+
+            self.extend_sighting_routes(player, time, position, &sight.wards);
             for handle in &sight.wards {
                 let ward = self.wards.entry(*handle).or_default();
                 ward.heroes.insert(player);
@@ -207,13 +245,26 @@ impl VisionMetrics {
                         let ward = self.wards.entry(*handle).or_default();
                         if hidden_seconds >= FRESH_SIGHTING_THRESHOLD_SECONDS {
                             ward.fresh_sightings += 1.0 / sight.wards.len() as f64;
+                            let index = ward.sightings.len();
                             ward.sightings.push(SightingEvidence {
+                                sample_tick,
                                 time,
-                                target_player: player.to_string(),
+                                target_player_slot: player,
+                                target_steam_id: steam_id.map(|id| id.to_string()),
+                                target_hero_name: hero_name.clone(),
+                                target_is_radiant: team == 2,
+                                target_position: position.unwrap_or_default(),
                                 hidden_seconds,
+                                visible_seconds: None,
+                                lost_position: None,
+                                route: vec![SightingRoutePoint {
+                                    time,
+                                    position: position.unwrap_or_default(),
+                                }],
                                 observer_handles: sight.wards.clone(),
                                 credit: 1.0 / sight.wards.len() as f64,
                             });
+                            self.open_sightings.insert((player, *handle), index);
                         }
                         let metrics = &mut ward.metrics;
                         metrics.scouting_discovery_seconds += discovery;
@@ -230,11 +281,88 @@ impl VisionMetrics {
             } else {
                 Some(old.and_then(|old| old.unseen_since).unwrap_or(time))
             };
-            self.targets.insert(player, TargetState { sight, unseen_since });
+
+            self.targets.insert(
+                player,
+                TargetState {
+                    sight,
+                    unseen_since,
+                    position,
+                },
+            );
         }
     }
 
-    fn integrate(&mut self, sight: &Sight, elapsed: f64, time: f64, player: u64) {
+    fn extend_sighting_routes(&mut self, player: u8, time: f64, position: Option<[f32; 3]>, ward_handles: &[u32]) {
+        let Some(position) = position else {
+            return;
+        };
+
+        for &handle in ward_handles {
+            let Some(&index) = self.open_sightings.get(&(player, handle)) else {
+                continue;
+            };
+
+            let Some(sighting) = self.wards.get_mut(&handle).and_then(|ward| ward.sightings.get_mut(index)) else {
+                continue;
+            };
+
+            let Some(previous) = sighting.route.last() else {
+                continue;
+            };
+
+            let distance = previous
+                .position
+                .iter()
+                .zip(position)
+                .map(|(left, right)| (left - right).powi(2))
+                .sum::<f32>()
+                .sqrt();
+
+            if time - previous.time >= ROUTE_SAMPLE_SECONDS || distance >= ROUTE_SAMPLE_DISTANCE {
+                sighting.route.push(SightingRoutePoint { time, position });
+            }
+        }
+    }
+
+    fn finish_missing_sightings(
+        &mut self,
+        player: u8,
+        time: f64,
+        last_visible_time: f64,
+        position: Option<[f32; 3]>,
+        visible_wards: &[u32],
+    ) {
+        let sightings = self
+            .open_sightings
+            .iter()
+            .filter(|((slot, handle), _)| *slot == player && !visible_wards.contains(handle))
+            .map(|(&(slot, handle), &index)| (slot, handle, index))
+            .collect::<Vec<_>>();
+
+        for (slot, handle, index) in sightings {
+            self.open_sightings.remove(&(slot, handle));
+
+            let Some(sighting) = self.wards.get_mut(&handle).and_then(|ward| ward.sightings.get_mut(index)) else {
+                continue;
+            };
+
+            sighting.visible_seconds = Some((time - sighting.time).max(0.0));
+            sighting.lost_position = position;
+
+            if let Some(position) = position {
+                let duplicate = sighting.route.last().is_some_and(|point| point.position == position);
+                if !duplicate {
+                    sighting.route.push(SightingRoutePoint {
+                        time: last_visible_time,
+                        position,
+                    });
+                }
+            }
+        }
+    }
+
+    fn integrate(&mut self, sight: &Sight, elapsed: f64, time: f64, player: u8) {
         for handle in &sight.wards {
             let ward = self.wards.entry(*handle).or_default();
             let added = if sight.non_ward {
@@ -242,16 +370,18 @@ impl VisionMetrics {
             } else {
                 elapsed / sight.wards.len() as f64
             };
+
             if elapsed > 0.0 {
                 let previous = ward.last_interval.get(&player).copied();
-                let merge = previous.is_some_and(|index| {
+                let merge = previous.filter(|&index| {
                     let interval = &ward.intervals[index];
                     (interval.end - (time - elapsed)).abs() < 1e-6
                         && interval.observer_handles == sight.wards
                         && interval.non_ward == sight.non_ward
                 });
-                if merge {
-                    let interval = &mut ward.intervals[previous.unwrap()];
+
+                if let Some(index) = merge {
+                    let interval = &mut ward.intervals[index];
                     interval.end = time;
                     interval.added_seconds += added;
                 } else {
@@ -266,8 +396,10 @@ impl VisionMetrics {
                     });
                 }
             }
+
             let metrics = &mut ward.metrics;
             metrics.enemy_hero_seconds += elapsed;
+
             if !sight.non_ward {
                 metrics.scouting_tracking_seconds += elapsed / sight.wards.len() as f64;
                 if sight.wards.len() == 1 {
@@ -280,110 +412,4 @@ impl VisionMetrics {
 
 fn discovery_bonus(unseen_seconds: f64) -> f64 {
     -DISCOVERY_TAU_SECONDS * (-unseen_seconds.max(0.0) / DISCOVERY_TAU_SECONDS).exp_m1()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn player(state: Observation) -> PlayerObservation {
-        PlayerObservation { id: 7, team: 3, state }
-    }
-
-    #[test]
-    fn added_vision_is_split_between_observer_wards() {
-        let mut metrics = VisionMetrics::default();
-        let wards = [(10, 2), (11, 2)];
-        let sight = || {
-            Observation::Alive(Sight {
-                wards: vec![10, 11],
-                non_ward: false,
-            })
-        };
-
-        metrics.sample(0.0, vec![player(sight())], &wards);
-        metrics.sample(0.2, vec![player(sight())], &wards);
-
-        assert!((metrics.measurement(10).added_vision_seconds - 0.1).abs() < 1e-9);
-        assert!((metrics.measurement(11).added_vision_seconds - 0.1).abs() < 1e-9);
-        let measurement = metrics.measurement(10);
-        assert_eq!(measurement.intervals.len(), 1);
-        assert_eq!(measurement.intervals[0].observer_handles, vec![10, 11]);
-        assert!((measurement.intervals[0].added_seconds - measurement.added_vision_seconds).abs() < 1e-9);
-    }
-
-    #[test]
-    fn new_ward_does_not_inherit_previous_interval_coverage() {
-        let mut metrics = VisionMetrics::default();
-        metrics.sample(0.0, vec![player(Observation::Dead)], &[]);
-        metrics.sample(0.2, vec![player(Observation::Dead)], &[(10, 2)]);
-        assert_eq!(metrics.measurement(10).known_target_seconds, 0.0);
-        metrics.sample(0.4, vec![player(Observation::Dead)], &[(10, 2)]);
-        assert!((metrics.measurement(10).known_target_seconds - 0.2).abs() < 1e-9);
-    }
-
-    #[test]
-    fn recovery_from_unknown_does_not_backfill_coverage() {
-        let mut metrics = VisionMetrics::default();
-        metrics.sample(0.0, vec![player(Observation::Unknown)], &[(10, 2)]);
-        metrics.sample(0.2, vec![player(Observation::Dead)], &[(10, 2)]);
-        assert_eq!(metrics.measurement(10).known_target_seconds, 0.0);
-    }
-
-    #[test]
-    fn gap_cannot_create_a_fresh_sighting() {
-        let mut metrics = VisionMetrics::default();
-        metrics.sample(0.0, vec![player(Observation::Alive(Sight::default()))], &[(10, 2)]);
-        metrics.sample(
-            6.0,
-            vec![player(Observation::Alive(Sight {
-                wards: vec![10],
-                non_ward: false,
-            }))],
-            &[(10, 2)],
-        );
-        assert_eq!(metrics.measurement(10).fresh_sightings, 0.0);
-        assert_eq!(metrics.measurement(10).known_target_seconds, 0.0);
-    }
-
-    #[test]
-    fn unknown_target_time_reduces_coverage_without_becoming_zero_impact() {
-        let mut metrics = VisionMetrics::default();
-        let wards = [(10, 2)];
-
-        metrics.sample(0.0, vec![player(Observation::Unknown)], &wards);
-        metrics.sample(0.2, vec![player(Observation::Unknown)], &wards);
-
-        let measurement = metrics.measurement(10);
-        assert!((measurement.eligible_target_seconds - 0.2).abs() < 1e-9);
-        assert_eq!(measurement.known_target_seconds, 0.0);
-        assert_eq!(measurement.coverage, Some(0.0));
-    }
-
-    #[test]
-    fn fresh_sighting_requires_five_known_hidden_seconds_and_splits_credit() {
-        let mut metrics = VisionMetrics::default();
-        let wards = [(10, 2), (11, 2)];
-        let hidden = || Observation::Alive(Sight::default());
-
-        metrics.sample(0.0, vec![player(hidden())], &wards);
-        for sample in 1..=25 {
-            metrics.sample(sample as f64 * 0.2, vec![player(hidden())], &wards);
-        }
-        metrics.sample(
-            5.2,
-            vec![player(Observation::Alive(Sight {
-                wards: vec![10, 11],
-                non_ward: false,
-            }))],
-            &wards,
-        );
-
-        assert_eq!(metrics.measurement(10).fresh_sightings, 0.5);
-        assert_eq!(metrics.measurement(11).fresh_sightings, 0.5);
-        let measurement = metrics.measurement(10);
-        assert_eq!(measurement.sightings.len(), 1);
-        assert_eq!(measurement.sightings[0].target_player, "7");
-        assert_eq!(measurement.sightings[0].credit, measurement.fresh_sightings);
-    }
 }
