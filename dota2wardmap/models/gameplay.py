@@ -266,32 +266,15 @@ class WardFreshSightingCredit(db.Model):
         index=True,
     )
     credit: Mapped[float] = mapped_column(Float, nullable=False)
-    visible_seconds: Mapped[float | None] = mapped_column(Float)
-    lost_x: Mapped[float | None] = mapped_column(Float)
-    lost_y: Mapped[float | None] = mapped_column(Float)
-    lost_z: Mapped[float | None] = mapped_column(Float)
 
-    def __init__(
-        self,
-        event_id: int,
-        ward_id: int,
-        credit: float,
-        visible_seconds: float | None,
-        lost_x: float | None,
-        lost_y: float | None,
-        lost_z: float | None,
-    ) -> None:
+    def __init__(self, event_id: int, ward_id: int, credit: float) -> None:
         self.event_id = event_id
         self.ward_id = ward_id
         self.credit = credit
-        self.visible_seconds = visible_seconds
-        self.lost_x = lost_x
-        self.lost_y = lost_y
-        self.lost_z = lost_z
 
 
-class FreshSightingRoutePoint(db.Model):
-    __tablename__ = "fresh_sighting_route_points"
+class WardSightingSegment(db.Model):
+    __tablename__ = "ward_sighting_segments"
     __table_args__ = (
         ForeignKeyConstraint(
             ["event_id", "ward_id"],
@@ -304,6 +287,59 @@ class FreshSightingRoutePoint(db.Model):
     ward_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     sequence: Mapped[int] = mapped_column(Integer, primary_key=True)
     time_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    gap_seconds: Mapped[float | None] = mapped_column(Float)
+    start_x: Mapped[float] = mapped_column(Float, nullable=False)
+    start_y: Mapped[float] = mapped_column(Float, nullable=False)
+    start_z: Mapped[float] = mapped_column(Float, nullable=False)
+    visible_seconds: Mapped[float | None] = mapped_column(Float)
+    lost_x: Mapped[float | None] = mapped_column(Float)
+    lost_y: Mapped[float | None] = mapped_column(Float)
+    lost_z: Mapped[float | None] = mapped_column(Float)
+
+    def __init__(
+        self,
+        event_id: int,
+        ward_id: int,
+        sequence: int,
+        time_seconds: float,
+        gap_seconds: float | None,
+        start_x: float,
+        start_y: float,
+        start_z: float,
+        visible_seconds: float | None,
+        lost_x: float | None,
+        lost_y: float | None,
+        lost_z: float | None,
+    ) -> None:
+        self.event_id = event_id
+        self.ward_id = ward_id
+        self.sequence = sequence
+        self.time_seconds = time_seconds
+        self.gap_seconds = gap_seconds
+        self.start_x = start_x
+        self.start_y = start_y
+        self.start_z = start_z
+        self.visible_seconds = visible_seconds
+        self.lost_x = lost_x
+        self.lost_y = lost_y
+        self.lost_z = lost_z
+
+
+class FreshSightingRoutePoint(db.Model):
+    __tablename__ = "fresh_sighting_route_points"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["event_id", "ward_id", "segment_sequence"],
+            ["ward_sighting_segments.event_id", "ward_sighting_segments.ward_id", "ward_sighting_segments.sequence"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    event_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    ward_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    segment_sequence: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sequence: Mapped[int] = mapped_column(Integer, primary_key=True)
+    time_seconds: Mapped[float] = mapped_column(Float, nullable=False)
     x: Mapped[float] = mapped_column(Float, nullable=False)
     y: Mapped[float] = mapped_column(Float, nullable=False)
     z: Mapped[float] = mapped_column(Float, nullable=False)
@@ -312,6 +348,7 @@ class FreshSightingRoutePoint(db.Model):
         self,
         event_id: int,
         ward_id: int,
+        segment_sequence: int,
         sequence: int,
         time_seconds: float,
         x: float,
@@ -320,6 +357,7 @@ class FreshSightingRoutePoint(db.Model):
     ) -> None:
         self.event_id = event_id
         self.ward_id = ward_id
+        self.segment_sequence = segment_sequence
         self.sequence = sequence
         self.time_seconds = time_seconds
         self.x = x

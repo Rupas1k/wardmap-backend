@@ -8,6 +8,7 @@ from .gameplay import (
     Team,
     Ward,
     WardFreshSightingCredit,
+    WardSightingSegment,
     players_matches,
 )
 from .jobs import ReplayJob
@@ -23,5 +24,6 @@ __all__ = [
     "Team",
     "Ward",
     "WardFreshSightingCredit",
+    "WardSightingSegment",
     "players_matches",
 ]

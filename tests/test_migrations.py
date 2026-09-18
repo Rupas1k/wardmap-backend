@@ -25,7 +25,7 @@ def test_upgrade_creates_schema_from_single_baseline(monkeypatch, tmp_path):
 
     with engine.connect() as connection:
         version = connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one()
-    assert version == "e46ab93d8f20"
+    assert version == "a68d2f4e90b1"
     ward_columns = {column["name"] for column in inspect(engine).get_columns("wards")}
     assert {
         "scouting_score",

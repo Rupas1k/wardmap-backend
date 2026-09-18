@@ -17,6 +17,7 @@ from ..models import (
     Team,
     Ward,
     WardFreshSightingCredit,
+    WardSightingSegment,
     players_matches,
 )
 
@@ -115,6 +116,10 @@ def persist_parsed_replay(result: ParsedReplay) -> bool:
             }
             measurement = ward_data.get("measurement")
             values.update(_measurement_values(measurement))
+            if measurement is not None and measurement.get("outcome") == "expired":
+                values["is_destroyed"] = False
+                values["player_destroyed_id"] = None
+                values["npc_killed"] = None
             wards.append(values)
             parsed_wards.append({**values, "measurement": measurement})
 
@@ -249,18 +254,34 @@ def _replace_fresh_sightings(match_id: int, matches: list[tuple[Ward, dict[str, 
             event_id=event.id,
             ward_id=ward_id,
             credit=float(sighting["credit"]),
-            visible_seconds=sighting.get("visible_seconds"),
-            lost_x=(sighting.get("lost_position") or [None, None, None])[0],
-            lost_y=(sighting.get("lost_position") or [None, None, None])[1],
-            lost_z=(sighting.get("lost_position") or [None, None, None])[2],
         )
         for event, ward_id, sighting in credits
+    )
+    db.session.flush()
+    db.session.add_all(
+        WardSightingSegment(
+            event_id=event.id,
+            ward_id=ward_id,
+            sequence=sequence,
+            time_seconds=float(segment["time"]),
+            gap_seconds=segment.get("gap_seconds"),
+            start_x=float(segment["start_position"][0]),
+            start_y=float(segment["start_position"][1]),
+            start_z=float(segment["start_position"][2]),
+            visible_seconds=segment.get("visible_seconds"),
+            lost_x=(segment.get("lost_position") or [None, None, None])[0],
+            lost_y=(segment.get("lost_position") or [None, None, None])[1],
+            lost_z=(segment.get("lost_position") or [None, None, None])[2],
+        )
+        for event, ward_id, sighting in credits
+        for sequence, segment in enumerate(sighting.get("segments", []))
     )
     db.session.flush()
     db.session.add_all(
         FreshSightingRoutePoint(
             event_id=event.id,
             ward_id=ward_id,
+            segment_sequence=segment_sequence,
             sequence=sequence,
             time_seconds=float(point["time"]),
             x=float(point["position"][0]),
@@ -268,7 +289,8 @@ def _replace_fresh_sightings(match_id: int, matches: list[tuple[Ward, dict[str, 
             z=float(point["position"][2]),
         )
         for event, ward_id, sighting in credits
-        for sequence, point in enumerate(sighting.get("route", []))
+        for segment_sequence, segment in enumerate(sighting.get("segments", []))
+        for sequence, point in enumerate(segment.get("route", []))
     )
 
 
@@ -280,6 +302,11 @@ def _update_existing_measurements(match_id: int, parsed_wards: list[dict[str, An
         measurement = _measurement_values(candidate["measurement"])
         for name, value in measurement.items():
             setattr(ward, name, value)
+
+        if measurement.get("outcome") == "expired":
+            ward.is_destroyed = False
+            ward.player_destroyed_id = None
+            ward.npc_killed = None
 
     _replace_fresh_sightings(match_id, matches)
 

@@ -4,6 +4,7 @@ from flask import Flask, g
 from dota2wardmap.api.players import bp as players_bp
 from dota2wardmap.api.teams import bp as teams_bp
 from dota2wardmap.api.wards import MAX_FILTER_IDS, bp
+from dota2wardmap.domain import AccessLevel
 from dota2wardmap.extensions import db
 from dota2wardmap.models import (
     FreshSightingEvent,
@@ -14,6 +15,7 @@ from dota2wardmap.models import (
     Team,
     Ward,
     WardFreshSightingCredit,
+    WardSightingSegment,
 )
 
 
@@ -340,6 +342,8 @@ def test_ward_evidence_returns_normalized_sightings():
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
     db.init_app(app)
     app.register_blueprint(bp)
+    access = {"level": AccessLevel.ADVANCED}
+    app.before_request(lambda: setattr(g, "access_level", access["level"]))
 
     with app.app_context():
         db.create_all()
@@ -378,6 +382,18 @@ def test_ward_evidence_returns_normalized_sightings():
                 event_id=event.id,
                 ward_id=ward.id,
                 credit=0.5,
+            )
+        )
+        db.session.add(
+            WardSightingSegment(
+                event_id=event.id,
+                ward_id=ward.id,
+                sequence=0,
+                time_seconds=125.5,
+                gap_seconds=None,
+                start_x=100,
+                start_y=200,
+                start_z=300,
                 visible_seconds=8.4,
                 lost_x=130,
                 lost_y=240,
@@ -388,6 +404,7 @@ def test_ward_evidence_returns_normalized_sightings():
             FreshSightingRoutePoint(
                 event_id=event.id,
                 ward_id=ward.id,
+                segment_sequence=0,
                 sequence=0,
                 time_seconds=125.5,
                 x=100,
@@ -399,6 +416,8 @@ def test_ward_evidence_returns_normalized_sightings():
 
         with app.test_client() as client:
             response = client.get(f"/wards/{ward.id}/evidence")
+            access["level"] = AccessLevel.ANONYMOUS
+            anonymous_response = client.get(f"/wards/{ward.id}/evidence")
 
     assert response.status_code == 200
     sighting = response.get_json()["sightings"][0]
@@ -406,7 +425,69 @@ def test_ward_evidence_returns_normalized_sightings():
     assert sighting["target_steam_id"] == "76561197960265950"
     assert sighting["target_hero_name"] == "CDOTA_Unit_Hero_Axe"
     assert sighting["target_position"] == [100.0, 200.0, 300.0]
-    assert sighting["visible_seconds"] == 8.4
-    assert sighting["lost_position"] == [130.0, 240.0, 300.0]
-    assert sighting["route"] == [{"position": [100.0, 200.0, 300.0], "time": 125.5}]
+    assert sighting["segments"] == [
+        {
+            "gap_seconds": None,
+            "lost_position": [130.0, 240.0, 300.0],
+            "route": [{"position": [100.0, 200.0, 300.0], "time": 125.5}],
+            "start_position": [100.0, 200.0, 300.0],
+            "time": 125.5,
+            "visible_seconds": 8.4,
+        }
+    ]
     assert sighting["credit"] == 0.5
+    anonymous_sighting = anonymous_response.get_json()["sightings"][0]
+    assert anonymous_sighting == sighting
+
+
+def test_bulk_ward_response_omits_sighting_evidence():
+    app = Flask(__name__)
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
+    db.init_app(app)
+    app.register_blueprint(bp)
+    app.before_request(lambda: setattr(g, "access_level", AccessLevel.ANONYMOUS))
+
+    with app.app_context():
+        db.create_all()
+        db.session.add(Match(id=400, duration=2400))
+        db.session.add(
+            Ward(
+                match_id=400,
+                is_obs=True,
+                is_radiant=True,
+                is_destroyed=False,
+                is_post_game=False,
+                time_placed=100,
+                duration=360,
+                x_pos=10,
+                y_pos=20,
+                z_pos=30,
+                measurement_version=2,
+                measurement_revision=1,
+                measurement_evidence={
+                    "sightings": [
+                        {
+                            "sample_tick": 1234,
+                            "time": 125.5,
+                            "target_player_slot": 6,
+                            "target_steam_id": "76561197960265950",
+                            "target_hero_name": "CDOTA_Unit_Hero_Axe",
+                            "target_is_radiant": False,
+                            "target_position": [100, 200, 300],
+                            "hidden_seconds": 54,
+                            "visible_seconds": 8.4,
+                            "lost_position": [130, 240, 300],
+                            "route": [{"time": 125.5, "position": [100, 200, 300]}],
+                            "observer_handles": [42],
+                            "credit": 1,
+                        }
+                    ]
+                },
+            )
+        )
+        db.session.commit()
+
+        with app.test_client() as client:
+            response = client.post("/wards/query", json={"match_ids": [400]})
+
+    assert response.get_json()["data"][0]["measurement"]["sightings"] == []

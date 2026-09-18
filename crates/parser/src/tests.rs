@@ -115,10 +115,41 @@ fn fresh_sighting_requires_five_known_hidden_seconds_and_splits_credit() {
     assert_eq!(measurement.sightings[0].target_player_slot, 7);
     assert_eq!(measurement.sightings[0].target_steam_id.as_deref(), Some("76561197960265735"));
     assert_eq!(measurement.sightings[0].credit, measurement.fresh_sightings);
-    assert!((measurement.sightings[0].visible_seconds.unwrap() - 0.2).abs() < 1e-9);
-    assert_eq!(measurement.sightings[0].lost_position, Some([1.0, 2.0, 3.0]));
-    assert_eq!(metrics.measurement(11).sightings[0].visible_seconds, None);
+    assert!((measurement.sightings[0].segments[0].visible_seconds.unwrap() - 0.2).abs() < 1e-9);
+    assert_eq!(measurement.sightings[0].segments[0].lost_position, Some([1.0, 2.0, 3.0]));
+    assert_eq!(metrics.measurement(11).sightings[0].segments[0].visible_seconds, None);
 
     metrics.sample(5.6, vec![player(hidden())], &wards);
-    assert!((metrics.measurement(11).sightings[0].visible_seconds.unwrap() - 0.4).abs() < 1e-9);
+    assert!((metrics.measurement(11).sightings[0].segments[0].visible_seconds.unwrap() - 0.4).abs() < 1e-9);
+}
+
+#[test]
+fn short_gap_creates_resighting_segment_without_new_fresh_sighting() {
+    let mut metrics = VisionMetrics::default();
+    let wards = [(10, 2)];
+    let hidden = || Observation::Alive(Sight::default());
+    let visible = || {
+        Observation::Alive(Sight {
+            wards: vec![10],
+            non_ward: false,
+        })
+    };
+
+    metrics.sample(0.0, vec![player(hidden())], &wards);
+    for sample in 1..=25 {
+        metrics.sample(sample as f64 * 0.2, vec![player(hidden())], &wards);
+    }
+    metrics.sample(5.2, vec![player(visible())], &wards);
+    metrics.sample(5.4, vec![player(hidden())], &wards);
+    metrics.sample(5.6, vec![player(hidden())], &wards);
+    metrics.sample(5.8, vec![player(hidden())], &wards);
+    metrics.sample(6.0, vec![player(visible())], &wards);
+    metrics.sample(6.2, vec![player(hidden())], &wards);
+
+    let measurement = metrics.measurement(10);
+    assert_eq!(measurement.fresh_sightings, 1.0);
+    assert_eq!(measurement.sightings.len(), 1);
+    assert_eq!(measurement.sightings[0].segments.len(), 2);
+    assert_eq!(measurement.sightings[0].segments[0].gap_seconds, None);
+    assert!((measurement.sightings[0].segments[1].gap_seconds.unwrap() - 0.8).abs() < 1e-9);
 }

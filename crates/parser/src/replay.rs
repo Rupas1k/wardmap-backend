@@ -31,6 +31,37 @@ struct ResultEvidence {
     outcome_reason: &'static str,
 }
 
+fn ended_at_expected_lifetime(entry: WardEntry, tick: i32) -> bool {
+    let lifetime = if entry.is_observer { 360.0 } else { 420.0 };
+    let age = (tick - entry.placed_tick) as f64 / 30.0;
+
+    (age - lifetime).abs() <= 0.25
+}
+
+fn shift_time(value: &mut serde_json::Value, start: f64) {
+    if let Some(time) = value.as_f64() {
+        *value = (time - start).into();
+    }
+}
+
+fn shift_sighting_times(sighting: &mut serde_json::Value, start: f64) {
+    shift_time(&mut sighting["time"], start);
+
+    let Some(segments) = sighting.get_mut("segments").and_then(serde_json::Value::as_array_mut) else {
+        return;
+    };
+
+    for segment in segments {
+        shift_time(&mut segment["time"], start);
+
+        if let Some(route) = segment.get_mut("route").and_then(serde_json::Value::as_array_mut) {
+            for point in route {
+                shift_time(&mut point["time"], start);
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 struct App {
     game_time: Rc<RefCell<GameTime>>,
@@ -73,7 +104,9 @@ impl App {
                 _ => None,
             };
 
+            let expected_expiry = ended_at_expected_lifetime(entry, tick);
             let (outcome, outcome_reason) = match &event {
+                _ if expected_expiry => ("expired", "expected_lifetime"),
                 WardEvent::Killed(killer) => self
                     .players
                     .borrow()
@@ -88,12 +121,6 @@ impl App {
                         }
                     }),
                 WardEvent::Expired if post_game => ("match_ended", "match_end"),
-                WardEvent::Expired
-                    if ((tick - entry.placed_tick) as f64 / 30.0 - if entry.is_observer { 360.0 } else { 420.0 }).abs()
-                        <= 0.25 =>
-                {
-                    ("expired", "expected_lifetime")
-                }
                 WardEvent::Expired => ("unknown", "entity_removal"),
                 WardEvent::Placed => ("unknown", "entity_event"),
             };
@@ -272,7 +299,7 @@ pub fn parse_replay(data: &[u8]) -> anyhow::Result<Replay> {
         let object = measurement
             .as_object_mut()
             .ok_or_else(|| anyhow!("Ward measurement did not serialize as an object"))?;
-        object.insert("revision".to_owned(), 1.into());
+        object.insert("revision".to_owned(), 2.into());
         if let Some(intervals) = object.get_mut("intervals").and_then(serde_json::Value::as_array_mut) {
             let start = app.game_time.borrow().start_time()? as f64;
             for interval in intervals {
@@ -286,9 +313,7 @@ pub fn parse_replay(data: &[u8]) -> anyhow::Result<Replay> {
         if let Some(sightings) = object.get_mut("sightings").and_then(serde_json::Value::as_array_mut) {
             let start = app.game_time.borrow().start_time()? as f64;
             for sighting in sightings {
-                if let Some(time) = sighting["time"].as_f64() {
-                    sighting["time"] = (time - start).into();
-                }
+                shift_sighting_times(sighting, start);
             }
         }
         object.insert("placed_at_seconds".to_owned(), evidence.placed_at_seconds.into());
@@ -328,7 +353,7 @@ pub fn parse_replay(data: &[u8]) -> anyhow::Result<Replay> {
             .is_some_and(|game_end| evidence.ended_at_seconds > f64::from(game_end))
         {
             ("match_ended", "match_end")
-        } else if ambiguous {
+        } else if ambiguous && matches!(evidence.outcome, "dewarded" | "allied_removed") {
             ("unknown", "ambiguous_removal")
         } else {
             (evidence.outcome, evidence.outcome_reason)
@@ -353,6 +378,59 @@ pub fn parse_replay(data: &[u8]) -> anyhow::Result<Replay> {
     }
 
     Ok(Replay { metadata, wards: result })
+}
+
+#[cfg(test)]
+mod outcome_tests {
+    use super::*;
+
+    fn ward_entry(is_observer: bool) -> WardEntry {
+        WardEntry {
+            hero_handle: 0,
+            placed_tick: 1_000,
+            is_radiant: true,
+            is_observer,
+            radiant_networth: 0,
+            dire_networth: 0,
+        }
+    }
+
+    #[test]
+    fn recognizes_expected_observer_lifetime() {
+        let entry = ward_entry(true);
+
+        assert!(ended_at_expected_lifetime(entry, 1_000 + 360 * 30));
+        assert!(!ended_at_expected_lifetime(entry, 1_000 + 359 * 30));
+    }
+
+    #[test]
+    fn recognizes_expected_sentry_lifetime() {
+        let entry = ward_entry(false);
+
+        assert!(ended_at_expected_lifetime(entry, 1_000 + 420 * 30));
+        assert!(!ended_at_expected_lifetime(entry, 1_000 + 419 * 30));
+    }
+
+    #[test]
+    fn shifts_all_sighting_times_to_game_time() {
+        let mut sighting = serde_json::json!({
+            "time": 1000.0,
+            "segments": [{
+                "time": 1000.0,
+                "route": [
+                    {"time": 1000.0},
+                    {"time": 1001.5}
+                ]
+            }]
+        });
+
+        shift_sighting_times(&mut sighting, 900.0);
+
+        assert_eq!(sighting["time"], 100.0);
+        assert_eq!(sighting["segments"][0]["time"], 100.0);
+        assert_eq!(sighting["segments"][0]["route"][0]["time"], 100.0);
+        assert_eq!(sighting["segments"][0]["route"][1]["time"], 101.5);
+    }
 }
 
 fn replay_metadata(info: &source2_demo::proto::CDemoFileInfo, ctx: &Context) -> ReplayMetadata {

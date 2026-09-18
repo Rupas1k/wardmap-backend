@@ -17,6 +17,7 @@ from ..models import (
     Team,
     Ward,
     WardFreshSightingCredit,
+    WardSightingSegment,
     players_matches,
 )
 
@@ -55,7 +56,6 @@ def unit_display_name(unit_name: str | None) -> str | None:
 
 def ward_response(row: Any) -> dict[str, Any]:
     data = row._asdict()
-    evidence = data.pop("measurement_evidence") or {}
     if data["measurement_version"] is None:
         data["measurement"] = None
     else:
@@ -73,7 +73,7 @@ def ward_response(row: Any) -> dict[str, Any]:
             "outcome": data.pop("outcome"),
             "outcome_reason": data.pop("outcome_reason"),
             "vision_complete": data.pop("vision_complete"),
-            "sightings": evidence.get("sightings", []),
+            "sightings": [],
         }
     for name in (
         "measurement_version",
@@ -120,7 +120,24 @@ def ward_evidence(ward_id: int):
         .order_by(FreshSightingEvent.time_seconds, FreshSightingEvent.id)
     ).all()
     event_ids = [event.id for event, _, _ in rows]
-    routes: dict[tuple[int, int], list[dict[str, object]]] = {}
+    segments: dict[tuple[int, int], list[WardSightingSegment]] = {}
+    if event_ids:
+        segment_rows = db.session.execute(
+            select(WardSightingSegment)
+            .where(
+                WardSightingSegment.event_id.in_(event_ids),
+                WardSightingSegment.ward_id == ward_id,
+            )
+            .order_by(
+                WardSightingSegment.event_id,
+                WardSightingSegment.ward_id,
+                WardSightingSegment.sequence,
+            )
+        ).scalars()
+        for segment in segment_rows:
+            segments.setdefault((segment.event_id, segment.ward_id), []).append(segment)
+
+    routes: dict[tuple[int, int, int], list[dict[str, object]]] = {}
     if event_ids:
         route_rows = db.session.execute(
             select(FreshSightingRoutePoint)
@@ -131,11 +148,12 @@ def ward_evidence(ward_id: int):
             .order_by(
                 FreshSightingRoutePoint.event_id,
                 FreshSightingRoutePoint.ward_id,
+                FreshSightingRoutePoint.segment_sequence,
                 FreshSightingRoutePoint.sequence,
             )
         ).scalars()
         for point in route_rows:
-            routes.setdefault((point.event_id, point.ward_id), []).append(
+            routes.setdefault((point.event_id, point.ward_id, point.segment_sequence), []).append(
                 {"time": point.time_seconds, "position": [point.x, point.y, point.z]}
             )
 
@@ -156,9 +174,21 @@ def ward_evidence(ward_id: int):
                 "target_is_radiant": event.target_is_radiant,
                 "target_position": [event.target_x, event.target_y, event.target_z],
                 "hidden_seconds": event.hidden_seconds,
-                "visible_seconds": credit.visible_seconds,
-                "lost_position": [credit.lost_x, credit.lost_y, credit.lost_z] if credit.lost_x is not None else None,
-                "route": routes.get((event.id, credit.ward_id), []),
+                "segments": [
+                    {
+                        "time": segment.time_seconds,
+                        "gap_seconds": segment.gap_seconds,
+                        "start_position": [segment.start_x, segment.start_y, segment.start_z],
+                        "visible_seconds": segment.visible_seconds,
+                        "lost_position":
+                            [segment.lost_x, segment.lost_y, segment.lost_z]
+                            if segment.lost_x is not None
+                            else None,
+                        "route": routes.get((event.id, credit.ward_id, segment.sequence), []),
+                    }
+                    for segment in segments.get((event.id, credit.ward_id), [])
+                ],
+                "observer_handles": [],
                 "credit": credit.credit,
             }
             for event, credit, player_name in rows
@@ -266,7 +296,6 @@ def ward_query():
             Ward.outcome,
             Ward.outcome_reason,
             Ward.vision_complete,
-            Ward.measurement_evidence,
             Match.duration.label("match_duration"),
             Match.game_version,
             League.map_asset_version,

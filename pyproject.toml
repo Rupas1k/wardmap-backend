@@ -10,5 +10,6 @@ testpaths = ["tests"]
 
 [tool.pyright]
 typeCheckingMode = "basic"
+extraPaths = ["crates/python"]
 include = ["dota2wardmap", "crates/python"]
 exclude = ["dota2wardmap/migrations", "tests"]

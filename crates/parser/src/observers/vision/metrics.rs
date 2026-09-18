@@ -8,13 +8,23 @@ pub const SAMPLE_INTERVAL_TICKS: i32 = 6;
 pub const MEASUREMENT_VERSION: u16 = 2;
 pub const FRESH_SIGHTING_THRESHOLD_SECONDS: f64 = 5.0;
 const MAX_INTERVAL_SECONDS: f64 = SAMPLE_INTERVAL_TICKS as f64 / 30.0 + 1e-6;
-const ROUTE_SAMPLE_SECONDS: f64 = 0.5;
+const ROUTE_SAMPLE_SECONDS: f64 = 0.25;
 const ROUTE_SAMPLE_DISTANCE: f32 = 128.0;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SightingRoutePoint {
     pub time: f64,
     pub position: [f32; 3],
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SightingSegmentEvidence {
+    pub time: f64,
+    pub gap_seconds: Option<f64>,
+    pub start_position: [f32; 3],
+    pub visible_seconds: Option<f64>,
+    pub lost_position: Option<[f32; 3]>,
+    pub route: Vec<SightingRoutePoint>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -38,9 +48,7 @@ pub struct SightingEvidence {
     pub target_is_radiant: bool,
     pub target_position: [f32; 3],
     pub hidden_seconds: f64,
-    pub visible_seconds: Option<f64>,
-    pub lost_position: Option<[f32; 3]>,
-    pub route: Vec<SightingRoutePoint>,
+    pub segments: Vec<SightingSegmentEvidence>,
     pub observer_handles: Vec<u32>,
     pub credit: f64,
 }
@@ -121,6 +129,18 @@ struct TargetState {
     position: Option<[f32; 3]>,
 }
 
+#[derive(Clone, Copy)]
+struct OpenSighting {
+    sighting: usize,
+    segment: usize,
+}
+
+#[derive(Clone, Copy)]
+struct RecentSighting {
+    sighting: usize,
+    lost_at: f64,
+}
+
 #[derive(Default)]
 pub struct VisionMetrics {
     previous_time: Option<f64>,
@@ -128,7 +148,8 @@ pub struct VisionMetrics {
     wards: HashMap<u32, WardAccumulator>,
     previous_known: HashSet<u8>,
     previous_active: Vec<(u32, i32)>,
-    open_sightings: HashMap<(u8, u32), usize>,
+    open_sightings: HashMap<(u8, u32), OpenSighting>,
+    recent_sightings: HashMap<(u8, u32), RecentSighting>,
 }
 
 impl VisionMetrics {
@@ -175,6 +196,7 @@ impl VisionMetrics {
                 self.targets.clear();
                 self.previous_known.clear();
                 self.open_sightings.clear();
+                self.recent_sightings.clear();
                 0.0
             }
         };
@@ -230,7 +252,6 @@ impl VisionMetrics {
                 &sight.wards,
             );
 
-            self.extend_sighting_routes(player, time, position, &sight.wards);
             for handle in &sight.wards {
                 let ward = self.wards.entry(*handle).or_default();
                 ward.heroes.insert(player);
@@ -255,16 +276,28 @@ impl VisionMetrics {
                                 target_is_radiant: team == 2,
                                 target_position: position.unwrap_or_default(),
                                 hidden_seconds,
-                                visible_seconds: None,
-                                lost_position: None,
-                                route: vec![SightingRoutePoint {
+                                segments: vec![SightingSegmentEvidence {
                                     time,
-                                    position: position.unwrap_or_default(),
+                                    gap_seconds: None,
+                                    start_position: position.unwrap_or_default(),
+                                    visible_seconds: None,
+                                    lost_position: None,
+                                    route: vec![SightingRoutePoint {
+                                        time,
+                                        position: position.unwrap_or_default(),
+                                    }],
                                 }],
                                 observer_handles: sight.wards.clone(),
                                 credit: 1.0 / sight.wards.len() as f64,
                             });
-                            self.open_sightings.insert((player, *handle), index);
+                            self.open_sightings.insert(
+                                (player, *handle),
+                                OpenSighting {
+                                    sighting: index,
+                                    segment: 0,
+                                },
+                            );
+                            self.recent_sightings.remove(&(player, *handle));
                         }
                         let metrics = &mut ward.metrics;
                         metrics.scouting_discovery_seconds += discovery;
@@ -275,6 +308,49 @@ impl VisionMetrics {
                     }
                 }
             }
+
+            for handle in &sight.wards {
+                let key = (player, *handle);
+                let newly_visible = old.as_ref().is_some_and(|old| !old.sight.wards.contains(handle));
+                if !newly_visible || self.open_sightings.contains_key(&key) {
+                    continue;
+                }
+
+                let Some(recent) = self.recent_sightings.get(&key).copied() else {
+                    continue;
+                };
+                let gap_seconds = time - recent.lost_at;
+                if !(0.0..FRESH_SIGHTING_THRESHOLD_SECONDS).contains(&gap_seconds) {
+                    self.recent_sightings.remove(&key);
+                    continue;
+                }
+
+                let ward = self.wards.entry(*handle).or_default();
+                let Some(sighting) = ward.sightings.get_mut(recent.sighting) else {
+                    self.recent_sightings.remove(&key);
+                    continue;
+                };
+                let segment = sighting.segments.len();
+                let position = position.unwrap_or_default();
+                sighting.segments.push(SightingSegmentEvidence {
+                    time,
+                    gap_seconds: Some(gap_seconds),
+                    start_position: position,
+                    visible_seconds: None,
+                    lost_position: None,
+                    route: vec![SightingRoutePoint { time, position }],
+                });
+                self.open_sightings.insert(
+                    key,
+                    OpenSighting {
+                        sighting: recent.sighting,
+                        segment,
+                    },
+                );
+                self.recent_sightings.remove(&key);
+            }
+
+            self.extend_sighting_routes(player, time, position, &sight.wards);
 
             let unseen_since = if visible {
                 None
@@ -299,15 +375,20 @@ impl VisionMetrics {
         };
 
         for &handle in ward_handles {
-            let Some(&index) = self.open_sightings.get(&(player, handle)) else {
+            let Some(&open) = self.open_sightings.get(&(player, handle)) else {
                 continue;
             };
 
-            let Some(sighting) = self.wards.get_mut(&handle).and_then(|ward| ward.sightings.get_mut(index)) else {
+            let Some(segment) = self
+                .wards
+                .get_mut(&handle)
+                .and_then(|ward| ward.sightings.get_mut(open.sighting))
+                .and_then(|sighting| sighting.segments.get_mut(open.segment))
+            else {
                 continue;
             };
 
-            let Some(previous) = sighting.route.last() else {
+            let Some(previous) = segment.route.last() else {
                 continue;
             };
 
@@ -320,7 +401,7 @@ impl VisionMetrics {
                 .sqrt();
 
             if time - previous.time >= ROUTE_SAMPLE_SECONDS || distance >= ROUTE_SAMPLE_DISTANCE {
-                sighting.route.push(SightingRoutePoint { time, position });
+                segment.route.push(SightingRoutePoint { time, position });
             }
         }
     }
@@ -337,28 +418,41 @@ impl VisionMetrics {
             .open_sightings
             .iter()
             .filter(|((slot, handle), _)| *slot == player && !visible_wards.contains(handle))
-            .map(|(&(slot, handle), &index)| (slot, handle, index))
+            .map(|(&(slot, handle), &open)| (slot, handle, open))
             .collect::<Vec<_>>();
 
-        for (slot, handle, index) in sightings {
+        for (slot, handle, open) in sightings {
             self.open_sightings.remove(&(slot, handle));
 
-            let Some(sighting) = self.wards.get_mut(&handle).and_then(|ward| ward.sightings.get_mut(index)) else {
+            let Some(segment) = self
+                .wards
+                .get_mut(&handle)
+                .and_then(|ward| ward.sightings.get_mut(open.sighting))
+                .and_then(|sighting| sighting.segments.get_mut(open.segment))
+            else {
                 continue;
             };
 
-            sighting.visible_seconds = Some((time - sighting.time).max(0.0));
-            sighting.lost_position = position;
+            segment.visible_seconds = Some((time - segment.time).max(0.0));
+            segment.lost_position = position;
 
             if let Some(position) = position {
-                let duplicate = sighting.route.last().is_some_and(|point| point.position == position);
+                let duplicate = segment.route.last().is_some_and(|point| point.position == position);
                 if !duplicate {
-                    sighting.route.push(SightingRoutePoint {
+                    segment.route.push(SightingRoutePoint {
                         time: last_visible_time,
                         position,
                     });
                 }
             }
+
+            self.recent_sightings.insert(
+                (slot, handle),
+                RecentSighting {
+                    sighting: open.sighting,
+                    lost_at: last_visible_time,
+                },
+            );
         }
     }
 
