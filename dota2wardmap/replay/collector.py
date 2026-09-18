@@ -44,6 +44,7 @@ def sync_league(league_id: int, *, refresh_unparsed_jobs: bool = False) -> tuple
             job.status = JobStatus.PENDING
             job.attempts = 0
             job.claimed_at = None
+            job.next_attempt_at = None
             job.completed_at = None
             job.last_error = None
             refreshed_ids.add(job.match_id)

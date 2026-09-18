@@ -34,9 +34,14 @@ def run_replay_worker() -> None:
 
     try:
         while not shutdown.is_set():
-            _restart_failed_processes(processes, task_queues, result_queue, assignments)
-            _collect_results(result_queue, assignments)
-            _assign_pending_jobs(processes, task_queues, assignments)
+            try:
+                _restart_failed_processes(processes, task_queues, result_queue, assignments)
+                _collect_results(result_queue, assignments)
+                _assign_pending_jobs(processes, task_queues, assignments)
+            except Exception:
+                db.session.rollback()
+                logger.exception("Replay worker cycle failed; retrying")
+                shutdown.wait(1.0)
             shutdown.wait(0.2)
     finally:
         _stop_processes(processes, task_queues, assignments)
@@ -77,16 +82,25 @@ def _collect_results(result_queue, assignments) -> None:
         except Empty:
             break
 
-        job = db.session.get(ReplayJob, match_id)
-        if job is not None:
-            if result is not None and persist_parsed_replay(result):
-                complete_job(job)
-            else:
-                fail_job(job, error or "Unable to persist parsed replay")
-        for index, assigned_match_id in tuple(assignments.items()):
-            if assigned_match_id == match_id:
-                assignments.pop(index)
-                break
+        try:
+            job = db.session.get(ReplayJob, match_id)
+            if job is not None:
+                if result is not None and persist_parsed_replay(result):
+                    complete_job(job)
+                else:
+                    fail_job(job, error or "Unable to persist parsed replay")
+        except Exception as exc:
+            db.session.rollback()
+            logger.exception("Unable to process replay result for match %s", match_id)
+
+            job = db.session.get(ReplayJob, match_id)
+            if job is not None and job.status == "processing":
+                fail_job(job, str(exc))
+        finally:
+            for index, assigned_match_id in tuple(assignments.items()):
+                if assigned_match_id == match_id:
+                    assignments.pop(index)
+                    break
 
 
 def _assign_pending_jobs(processes, task_queues, assignments) -> None:
@@ -96,8 +110,15 @@ def _assign_pending_jobs(processes, task_queues, assignments) -> None:
         job = claim_job(ReplayJob)
         if job is None:
             break
+        try:
+            task_queues[index].put(job.match_id)
+        except Exception as exc:
+            db.session.rollback()
+            fail_job(job, str(exc))
+            logger.exception("Unable to dispatch match %s to %s", job.match_id, process.name)
+            continue
+
         assignments[index] = job.match_id
-        task_queues[index].put(job.match_id)
 
 
 def _stop_processes(processes, task_queues, assignments) -> None:
