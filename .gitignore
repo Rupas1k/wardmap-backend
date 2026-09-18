@@ -1,6 +1,7 @@
 .env
 .env.remote
 /docs/
+/metrics/
 backups/
 .venv/
 venv/
