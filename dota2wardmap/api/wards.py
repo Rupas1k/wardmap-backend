@@ -35,6 +35,20 @@ ID_FILTER_NAMES = (
 )
 
 
+def compact_required_number(value: float, digits: int = 3) -> int | float:
+    rounded = round(float(value), digits)
+
+    return int(rounded) if rounded.is_integer() else rounded
+
+
+def compact_number(value: float | None, digits: int = 3) -> int | float | None:
+    return None if value is None else compact_required_number(value, digits)
+
+
+def compact_position(x: float, y: float, z: float) -> list[int | float]:
+    return [compact_required_number(x, 2), compact_required_number(y, 2), compact_required_number(z, 2)]
+
+
 def unit_display_name(unit_name: str | None) -> str | None:
     if not unit_name:
         return None
@@ -56,24 +70,43 @@ def unit_display_name(unit_name: str | None) -> str | None:
 
 def ward_response(row: Any) -> dict[str, Any]:
     data = row._asdict()
+    is_destroyed = data.pop("is_destroyed")
+    duration = data.pop("duration")
+    data["scouting_tracking_seconds"] = compact_number(data["scouting_tracking_seconds"])
+    data["scouting_discovery_seconds"] = compact_number(data["scouting_discovery_seconds"])
+
     if data["measurement_version"] is None:
-        data["measurement"] = None
+        placed_at = float(data["time_placed"])
+        data["measurement"] = {
+            "version": 0,
+            "revision": 0,
+            "added_vision_seconds": None,
+            "fresh_sightings": None,
+            "fresh_sighting_threshold_seconds": 5,
+            "vision_measured_seconds": 0,
+            "vision_possible_seconds": 0,
+            "vision_coverage": None,
+            "placed_at_seconds": compact_number(placed_at),
+            "ended_at_seconds": compact_number(placed_at + duration),
+            "outcome": "dewarded" if is_destroyed else "unknown",
+            "outcome_reason": "legacy",
+            "vision_complete": False,
+        }
     else:
         data["measurement"] = {
             "version": data.pop("measurement_version"),
             "revision": data.pop("measurement_revision"),
-            "added_vision_seconds": data.pop("added_vision_seconds"),
-            "fresh_sightings": data.pop("fresh_sightings"),
-            "fresh_sighting_threshold_seconds": data.pop("fresh_sighting_threshold_seconds"),
-            "vision_measured_seconds": data.pop("vision_measured_seconds"),
-            "vision_possible_seconds": data.pop("vision_possible_seconds"),
-            "vision_coverage": data.pop("vision_coverage"),
-            "placed_at_seconds": data.pop("placed_at_seconds"),
-            "ended_at_seconds": data.pop("ended_at_seconds"),
+            "added_vision_seconds": compact_number(data.pop("added_vision_seconds")),
+            "fresh_sightings": compact_number(data.pop("fresh_sightings")),
+            "fresh_sighting_threshold_seconds": compact_number(data.pop("fresh_sighting_threshold_seconds")),
+            "vision_measured_seconds": compact_number(data.pop("vision_measured_seconds")),
+            "vision_possible_seconds": compact_number(data.pop("vision_possible_seconds")),
+            "vision_coverage": compact_number(data.pop("vision_coverage"), 4),
+            "placed_at_seconds": compact_number(data.pop("placed_at_seconds")),
+            "ended_at_seconds": compact_number(data.pop("ended_at_seconds")),
             "outcome": data.pop("outcome"),
             "outcome_reason": data.pop("outcome_reason"),
             "vision_complete": data.pop("vision_complete"),
-            "sightings": [],
         }
     for name in (
         "measurement_version",
@@ -93,7 +126,7 @@ def ward_response(row: Any) -> dict[str, Any]:
         data.pop(name, None)
     npc_killed = data.pop("npc_killed")
 
-    if not data["is_destroyed"]:
+    if not is_destroyed:
         data.pop("player_destroyed_id")
         data.pop("player_destroyed_name")
     elif data["player_destroyed_name"] is None:
@@ -154,7 +187,10 @@ def ward_evidence(ward_id: int):
         ).scalars()
         for point in route_rows:
             routes.setdefault((point.event_id, point.ward_id, point.segment_sequence), []).append(
-                {"time": point.time_seconds, "position": [point.x, point.y, point.z]}
+                {
+                    "time": compact_number(point.time_seconds),
+                    "position": compact_position(point.x, point.y, point.z),
+                }
             )
 
     return {
@@ -165,31 +201,38 @@ def ward_evidence(ward_id: int):
             {
                 "event_id": event.id,
                 "sample_tick": event.sample_tick,
-                "time": event.time_seconds,
+                "time": compact_number(event.time_seconds),
                 "target_player_slot": event.target_player_slot,
                 "target_steam_id": event.target_steam_id,
                 "target_player_id": event.target_player_id,
                 "target_player_name": player_name,
                 "target_hero_name": event.target_hero_name,
                 "target_is_radiant": event.target_is_radiant,
-                "target_position": [event.target_x, event.target_y, event.target_z],
-                "hidden_seconds": event.hidden_seconds,
+                "target_position": compact_position(
+                    event.target_x,
+                    event.target_y,
+                    event.target_z,
+                ),
+                "hidden_seconds": compact_number(event.hidden_seconds),
                 "segments": [
                     {
-                        "time": segment.time_seconds,
-                        "gap_seconds": segment.gap_seconds,
-                        "start_position": [segment.start_x, segment.start_y, segment.start_z],
-                        "visible_seconds": segment.visible_seconds,
-                        "lost_position":
-                            [segment.lost_x, segment.lost_y, segment.lost_z]
-                            if segment.lost_x is not None
-                            else None,
+                        "time": compact_number(segment.time_seconds),
+                        "gap_seconds": compact_number(segment.gap_seconds),
+                        "start_position": compact_position(
+                            segment.start_x,
+                            segment.start_y,
+                            segment.start_z,
+                        ),
+                        "visible_seconds": compact_number(segment.visible_seconds),
+                        "lost_position": compact_position(segment.lost_x, segment.lost_y, segment.lost_z)
+                        if segment.lost_x is not None
+                        else None,
                         "route": routes.get((event.id, credit.ward_id, segment.sequence), []),
                     }
                     for segment in segments.get((event.id, credit.ward_id), [])
                 ],
                 "observer_handles": [],
-                "credit": credit.credit,
+                "credit": compact_number(credit.credit),
             }
             for event, credit, player_name in rows
         ],
@@ -272,17 +315,8 @@ def ward_query():
             Ward.z_pos,
             Ward.radiant_networth,
             Ward.dire_networth,
-            Ward.enemy_hero_vision_seconds,
-            Ward.unique_enemy_hero_vision_seconds,
-            Ward.heroes_spotted,
-            Ward.hero_reveal_events,
-            Ward.unique_hero_reveal_events,
             Ward.scouting_tracking_seconds,
             Ward.scouting_discovery_seconds,
-            Ward.scouting_score,
-            Ward.scouting_version,
-            Ward.scouting_tau_seconds,
-            Ward.scouting_complete,
             Ward.measurement_version,
             Ward.measurement_revision,
             Ward.added_vision_seconds,
