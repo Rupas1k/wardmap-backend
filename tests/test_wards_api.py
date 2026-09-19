@@ -167,8 +167,6 @@ def test_query_wards_applies_dataset_filters():
                 "scouting_tracking_seconds": 75.5,
                 "scouting_discovery_seconds": 30.25,
                 "measurement": {
-                    "version": 0,
-                    "revision": 0,
                     "added_vision_seconds": None,
                     "fresh_sightings": None,
                     "fresh_sighting_threshold_seconds": 5.0,
@@ -181,8 +179,6 @@ def test_query_wards_applies_dataset_filters():
                     "outcome_reason": "legacy",
                     "vision_complete": False,
                 },
-                "game_version": None,
-                "map_asset_version": 2,
                 "match_duration": 2400,
                 "team_id": 10,
                 "team_name": "Radiant Team",

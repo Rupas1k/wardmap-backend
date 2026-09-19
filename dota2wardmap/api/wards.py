@@ -11,7 +11,6 @@ from ..extensions import db
 from ..models import (
     FreshSightingEvent,
     FreshSightingRoutePoint,
-    League,
     Match,
     Player,
     Team,
@@ -78,8 +77,6 @@ def ward_response(row: Any) -> dict[str, Any]:
     if data["measurement_version"] is None:
         placed_at = float(data["time_placed"])
         data["measurement"] = {
-            "version": 0,
-            "revision": 0,
             "added_vision_seconds": None,
             "fresh_sightings": None,
             "fresh_sighting_threshold_seconds": 5,
@@ -94,8 +91,6 @@ def ward_response(row: Any) -> dict[str, Any]:
         }
     else:
         data["measurement"] = {
-            "version": data.pop("measurement_version"),
-            "revision": data.pop("measurement_revision"),
             "added_vision_seconds": compact_number(data.pop("added_vision_seconds")),
             "fresh_sightings": compact_number(data.pop("fresh_sightings")),
             "fresh_sighting_threshold_seconds": compact_number(data.pop("fresh_sighting_threshold_seconds")),
@@ -195,8 +190,6 @@ def ward_evidence(ward_id: int):
 
     return {
         "ward_id": ward.id,
-        "measurement_version": ward.measurement_version,
-        "measurement_revision": ward.measurement_revision,
         "sightings": [
             {
                 "event_id": event.id,
@@ -318,7 +311,6 @@ def ward_query():
             Ward.scouting_tracking_seconds,
             Ward.scouting_discovery_seconds,
             Ward.measurement_version,
-            Ward.measurement_revision,
             Ward.added_vision_seconds,
             Ward.fresh_sightings,
             Ward.fresh_sighting_threshold_seconds,
@@ -331,8 +323,6 @@ def ward_query():
             Ward.outcome_reason,
             Ward.vision_complete,
             Match.duration.label("match_duration"),
-            Match.game_version,
-            League.map_asset_version,
             owner_team_id.label("team_id"),
             owner_team.name.label("team_name"),
             opponent_team_id.label("opponent_team_id"),
@@ -341,7 +331,6 @@ def ward_query():
         )
         .select_from(Ward)
         .join(Match, Match.id == Ward.match_id)
-        .outerjoin(League, League.id == Match.league_id)
         .outerjoin(Player, Player.id == Ward.player_placed_id)
         .outerjoin(destroying_player, destroying_player.id == Ward.player_destroyed_id)
         .outerjoin(owner_team, owner_team.id == owner_team_id)
