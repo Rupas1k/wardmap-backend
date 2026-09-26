@@ -9,8 +9,12 @@ pub use output::{Output, Replay, ReplayMetadata, ReplayPlayer};
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[pyfunction]
-pub fn parse_replay(data: &[u8]) -> PyResult<Replay> {
-    catch_parser_error("replay", || wardmap_parser::parse_replay(data)).map(Replay::from)
+#[pyo3(signature = (data, map_version = None))]
+pub fn parse_replay(data: &[u8], map_version: Option<u8>) -> PyResult<Replay> {
+    catch_parser_error("replay", || {
+        wardmap_parser::parse_replay(data, map_version.unwrap_or(wardmap_parser::CURRENT_MAP_VERSION))
+    })
+    .map(Replay::from)
 }
 
 fn catch_parser_error<T>(operation: &str, parse: impl FnOnce() -> anyhow::Result<T> + std::panic::UnwindSafe) -> PyResult<T> {

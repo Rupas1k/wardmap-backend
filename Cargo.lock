@@ -893,6 +893,7 @@ checksum = "b8c0a043c9540bae7c578c88f91dda8bd82e59ae27c21baca69c8b191aaf5a6e"
 [[package]]
 name = "wardmap-parser"
 version = "0.1.0"
+source = "git+https://github.com/Rupas1k/wardmap-parser.git?rev=057cc7ca9c62b1b48dd0e25615dd69dcd04f674b#057cc7ca9c62b1b48dd0e25615dd69dcd04f674b"
 dependencies = [
  "anyhow",
  "hashbrown 0.17.1",
