@@ -218,7 +218,7 @@ def ward_evidence(ward_id: int):
                         ),
                         "visible_seconds": compact_number(segment.visible_seconds),
                         "lost_position": compact_position(segment.lost_x, segment.lost_y, segment.lost_z)
-                        if segment.lost_x is not None
+                        if segment.lost_x is not None and segment.lost_y is not None and segment.lost_z is not None
                         else None,
                         "route": routes.get((event.id, credit.ward_id, segment.sequence), []),
                     }
