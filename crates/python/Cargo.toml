@@ -14,4 +14,4 @@ name = "d2wm_parser"
 mimalloc = "0.1"
 wardmap-parser = { git = "https://github.com/Rupas1k/wardmap-parser.git", rev = "057cc7ca9c62b1b48dd0e25615dd69dcd04f674b" }
 anyhow = "1.0"
-pyo3 = { version = "0.29", features = ["extension-module"] }
+pyo3 = { version = "0.30", features = ["extension-module"] }
