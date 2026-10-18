@@ -1,13 +1,13 @@
 use pyo3::prelude::*;
 
-#[pyclass(get_all, skip_from_py_object)]
+#[pyclass(get_all)]
 #[derive(Clone)]
 pub struct Replay {
     pub metadata: ReplayMetadata,
     pub wards: Vec<Output>,
 }
 
-#[pyclass(get_all, skip_from_py_object)]
+#[pyclass(get_all)]
 #[derive(Clone)]
 pub struct ReplayMetadata {
     pub playback_time_seconds: Option<f32>,
@@ -26,7 +26,7 @@ pub struct ReplayMetadata {
     pub players: Vec<ReplayPlayer>,
 }
 
-#[pyclass(get_all, skip_from_py_object)]
+#[pyclass(get_all)]
 #[derive(Clone)]
 pub struct ReplayPlayer {
     pub steam_id: Option<u64>,
@@ -36,7 +36,7 @@ pub struct ReplayPlayer {
     pub is_fake_client: Option<bool>,
 }
 
-#[pyclass(get_all, set_all, skip_from_py_object)]
+#[pyclass(get_all, set_all)]
 #[derive(Clone)]
 pub struct Output {
     pub time_placed: i32,
