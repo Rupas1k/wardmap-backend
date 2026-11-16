@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 class ReplayUnavailableError(RuntimeError):
     pass
 
+
 _ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
 _CHINA_REPLAY_CLUSTERS = frozenset({413, 415, 417})
 

@@ -33,9 +33,7 @@ class PlayerSyncResult:
 
 
 def schedule_active_players_now() -> int:
-    players = (
-        db.session.execute(select(TrackedPlayer).where(TrackedPlayer.tracking_status == "active")).scalars().all()
-    )
+    players = db.session.execute(select(TrackedPlayer).where(TrackedPlayer.tracking_status == "active")).scalars().all()
     now = datetime.now(UTC)
 
     for player in players:
@@ -73,9 +71,7 @@ def sync_player(account_id: int) -> PlayerSyncResult:
             job = page_jobs_by_match_id.get(match_id)
             available_page.append(match_id)
             replay_unavailable = (
-                job is not None
-                and job.status == JobStatus.FAILED
-                and job.last_error == REPLAY_DELETED_ERROR
+                job is not None and job.status == JobStatus.FAILED and job.last_error == REPLAY_DELETED_ERROR
             )
             if replay_unavailable:
                 reached_unavailable = True
@@ -122,13 +118,9 @@ def sync_player(account_id: int) -> PlayerSyncResult:
 
     unparsed_jobs = [job for job in jobs_by_match_id.values() if job.match_id not in parsed_ids]
     unavailable = sum(
-        job.status == JobStatus.FAILED and job.last_error == REPLAY_DELETED_ERROR
-        for job in unparsed_jobs
+        job.status == JobStatus.FAILED and job.last_error == REPLAY_DELETED_ERROR for job in unparsed_jobs
     )
-    failed = sum(
-        job.status == JobStatus.FAILED and job.last_error != REPLAY_DELETED_ERROR
-        for job in unparsed_jobs
-    )
+    failed = sum(job.status == JobStatus.FAILED and job.last_error != REPLAY_DELETED_ERROR for job in unparsed_jobs)
     pending = len(unparsed_jobs) - unavailable - failed
     history = []
     for match_id in sorted(match_ids, reverse=True):

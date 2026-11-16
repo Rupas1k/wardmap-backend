@@ -401,6 +401,4 @@ def _attach_players(match: Match, match_data: dict[str, Any], wards: list[dict[s
                     .values(**values)
                 )
         else:
-            db.session.execute(
-                players_matches.insert().values(player_id=player_id, match_id=match.id, **values)
-            )
+            db.session.execute(players_matches.insert().values(player_id=player_id, match_id=match.id, **values))

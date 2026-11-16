@@ -19,9 +19,7 @@ logger = logging.getLogger(__name__)
 
 def recover_unparsed_jobs() -> int:
     jobs = (
-        db.session.execute(
-            select(ReplayJob).where(ReplayJob.status.in_((JobStatus.PENDING, JobStatus.PROCESSING)))
-        )
+        db.session.execute(select(ReplayJob).where(ReplayJob.status.in_((JobStatus.PENDING, JobStatus.PROCESSING))))
         .scalars()
         .all()
     )
