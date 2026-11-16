@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from flask import Flask
 
-from dota2wardmap.domain import JobStatus
+from dota2wardmap.domain import REPLAY_DELETED_ERROR, JobStatus
 from dota2wardmap.extensions import db
 from dota2wardmap.models import League, Match, Player, ReplayJob, TrackedPlayer
 from dota2wardmap.replay import collector
@@ -130,7 +130,7 @@ def test_sync_player_reports_terminal_jobs_without_requeueing(monkeypatch):
         db.create_all()
         unavailable = ReplayJob(100)
         unavailable.status = JobStatus.FAILED
-        unavailable.last_error = "Replay could not be downloaded"
+        unavailable.last_error = REPLAY_DELETED_ERROR
         failed = ReplayJob(101)
         failed.status = JobStatus.FAILED
         failed.last_error = "Invalid replay"
@@ -166,7 +166,7 @@ def test_sync_player_stops_at_first_unavailable_replay(monkeypatch):
         db.create_all()
         unavailable = ReplayJob(99)
         unavailable.status = JobStatus.FAILED
-        unavailable.last_error = "Replay could not be downloaded"
+        unavailable.last_error = REPLAY_DELETED_ERROR
         db.session.add_all(
             [Player(42), TrackedPlayer(42), unavailable, *(Match(match_id) for match_id in range(101, 121))]
         )

@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
-from ..domain import JobStatus
+from ..domain import REPLAY_DELETED_ERROR, JobStatus
 from ..extensions import db
 from ..integrations import dota_gc, opendota
 from ..job_maintenance import cleanup_terminal_jobs
@@ -75,7 +75,7 @@ def sync_player(account_id: int) -> PlayerSyncResult:
             replay_unavailable = (
                 job is not None
                 and job.status == JobStatus.FAILED
-                and job.last_error == "Replay could not be downloaded"
+                and job.last_error == REPLAY_DELETED_ERROR
             )
             if replay_unavailable:
                 reached_unavailable = True
@@ -122,11 +122,11 @@ def sync_player(account_id: int) -> PlayerSyncResult:
 
     unparsed_jobs = [job for job in jobs_by_match_id.values() if job.match_id not in parsed_ids]
     unavailable = sum(
-        job.status == JobStatus.FAILED and job.last_error == "Replay could not be downloaded"
+        job.status == JobStatus.FAILED and job.last_error == REPLAY_DELETED_ERROR
         for job in unparsed_jobs
     )
     failed = sum(
-        job.status == JobStatus.FAILED and job.last_error != "Replay could not be downloaded"
+        job.status == JobStatus.FAILED and job.last_error != REPLAY_DELETED_ERROR
         for job in unparsed_jobs
     )
     pending = len(unparsed_jobs) - unavailable - failed
@@ -139,7 +139,7 @@ def sync_player(account_id: int) -> PlayerSyncResult:
             status = "parsed"
         elif match_id in queued_ids or job is None:
             status = "queued"
-        elif job.status == JobStatus.FAILED and job.last_error == "Replay could not be downloaded":
+        elif job.status == JobStatus.FAILED and job.last_error == REPLAY_DELETED_ERROR:
             status = "unavailable"
         else:
             status = job.status

@@ -3,7 +3,7 @@ from typing import Any, cast
 
 from sqlalchemy import CursorResult, delete, or_, select
 
-from .domain import JobStatus
+from .domain import REPLAY_DELETED_ERROR, JobStatus
 from .extensions import db
 from .models import ReplayJob
 from .settings import get_settings
@@ -24,7 +24,7 @@ def cleanup_terminal_jobs(batch_size: int = DEFAULT_CLEANUP_BATCH_SIZE) -> int:
                         (ReplayJob.status == JobStatus.COMPLETED) & (ReplayJob.completed_at < cutoff),
                         (ReplayJob.status == JobStatus.FAILED)
                         & (ReplayJob.claimed_at < cutoff)
-                        & (ReplayJob.last_error != "Replay could not be downloaded"),
+                        & (ReplayJob.last_error != REPLAY_DELETED_ERROR),
                     )
                 )
                 .limit(batch_size)

@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import or_, select
 
-from .domain import JobStatus
+from .domain import REPLAY_DELETED_ERROR, JobStatus
 from .extensions import db
 from .models import ReplayJob
 
@@ -52,7 +52,7 @@ def complete_job(job: ReplayJob) -> None:
 
 
 def fail_job(job: ReplayJob, error: str) -> None:
-    terminal = job.attempts >= MAX_ATTEMPTS
+    terminal = error == REPLAY_DELETED_ERROR or job.attempts >= MAX_ATTEMPTS
     retry_index = min(max(job.attempts - 1, 0), len(RETRY_DELAYS) - 1)
 
     job.status = JobStatus.FAILED if terminal else JobStatus.PENDING

@@ -1,5 +1,7 @@
 from enum import StrEnum
 
+REPLAY_DELETED_ERROR = "Replay deleted from server"
+
 
 class AccessLevel(StrEnum):
     ANONYMOUS = "anonymous"

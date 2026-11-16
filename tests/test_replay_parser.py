@@ -5,6 +5,7 @@ from flask import Flask
 from sqlalchemy import select
 
 from dota2wardmap import create_worker_app
+from dota2wardmap.domain import REPLAY_DELETED_ERROR
 from dota2wardmap.extensions import db
 from dota2wardmap.models import (
     FreshSightingEvent,
@@ -115,7 +116,7 @@ def test_parser_only_marks_confirmed_expiration_as_unavailable(monkeypatch):
 
     monkeypatch.setattr(parser, "get_replay", unavailable)
     parser.download_and_parse_replay(124, result_queue)
-    assert result_queue.get() == (124, None, "Replay could not be downloaded")
+    assert result_queue.get() == (124, None, REPLAY_DELETED_ERROR)
 
 
 def test_persist_parsed_replay_persists_opendota_participants():

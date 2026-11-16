@@ -87,6 +87,15 @@ func TestRadiantWin(t *testing.T) {
 	}
 }
 
+func TestReplayState(t *testing.T) {
+	if got := replayState(protocol.CMsgDOTAMatch_REPLAY_EXPIRED); got != "expired" {
+		t.Fatalf("replayState(expired) = %q, want expired", got)
+	}
+	if got := replayState(protocol.CMsgDOTAMatch_REPLAY_NOT_RECORDED); got != "not_recorded" {
+		t.Fatalf("replayState(not recorded) = %q, want not_recorded", got)
+	}
+}
+
 func boolPointer(value bool) *bool {
 	return &value
 }

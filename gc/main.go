@@ -58,14 +58,15 @@ type matchPlayer struct {
 }
 
 type matchDetails struct {
-	MatchID    uint64        `json:"match_id"`
-	Cluster    uint32        `json:"cluster,omitempty"`
-	ReplaySalt uint32        `json:"replay_salt,omitempty"`
-	Duration   uint32        `json:"duration,omitempty"`
-	StartTime  uint32        `json:"start_time,omitempty"`
-	LeagueID   uint32        `json:"league_id,omitempty"`
-	RadiantWin *bool         `json:"radiant_win,omitempty"`
-	Players    []matchPlayer `json:"players"`
+	MatchID     uint64        `json:"match_id"`
+	Cluster     uint32        `json:"cluster,omitempty"`
+	ReplaySalt  uint32        `json:"replay_salt,omitempty"`
+	ReplayState string        `json:"replay_state"`
+	Duration    uint32        `json:"duration,omitempty"`
+	StartTime   uint32        `json:"start_time,omitempty"`
+	LeagueID    uint32        `json:"league_id,omitempty"`
+	RadiantWin  *bool         `json:"radiant_win,omitempty"`
+	Players     []matchPlayer `json:"players"`
 }
 
 func main() {
@@ -447,16 +448,28 @@ func (s *gcService) matchDetails(response http.ResponseWriter, request *http.Req
 	}
 
 	details := matchDetails{
-		MatchID:    match.GetMatchId(),
-		Cluster:    match.GetCluster(),
-		ReplaySalt: match.GetReplaySalt(),
-		Duration:   match.GetDuration(),
-		StartTime:  match.GetStarttime(),
-		LeagueID:   match.GetLeagueid(),
-		RadiantWin: radiantWin(match.GetMatchOutcome()),
-		Players:    players,
+		MatchID:     match.GetMatchId(),
+		Cluster:     match.GetCluster(),
+		ReplaySalt:  match.GetReplaySalt(),
+		ReplayState: replayState(match.GetReplayState()),
+		Duration:    match.GetDuration(),
+		StartTime:   match.GetStarttime(),
+		LeagueID:    match.GetLeagueid(),
+		RadiantWin:  radiantWin(match.GetMatchOutcome()),
+		Players:     players,
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"match": details})
+}
+
+func replayState(state protocol.CMsgDOTAMatch_ReplayState) string {
+	switch state {
+	case protocol.CMsgDOTAMatch_REPLAY_EXPIRED:
+		return "expired"
+	case protocol.CMsgDOTAMatch_REPLAY_NOT_RECORDED:
+		return "not_recorded"
+	default:
+		return "available"
+	}
 }
 
 func radiantWin(outcome protocol.EMatchOutcome) *bool {

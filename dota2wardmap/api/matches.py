@@ -5,7 +5,7 @@ from sqlalchemy import distinct, func, select
 from werkzeug.exceptions import BadRequest, NotFound
 
 from ..access import require_access
-from ..domain import AccessLevel, JobStatus
+from ..domain import REPLAY_DELETED_ERROR, AccessLevel, JobStatus
 from ..extensions import db
 from ..integrations import opendota
 from ..models import League, Match, Player, ReplayJob, Ward, players_matches
@@ -38,7 +38,7 @@ def match_statuses():
             status = "parsed"
         elif job is None:
             status = "queued"
-        elif job.status == JobStatus.FAILED and job.last_error == "Replay could not be downloaded":
+        elif job.status == JobStatus.FAILED and job.last_error == REPLAY_DELETED_ERROR:
             status = "unavailable"
         else:
             status = job.status

@@ -5,6 +5,7 @@ from typing import Any
 
 import requests
 
+from ..domain import REPLAY_DELETED_ERROR
 from ..integrations import dota_gc, opendota
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ def get_match_data(match_id: int) -> dict[str, Any]:
         "cluster": response.get("cluster"),
         "salt": response.get("replay_salt"),
         "replay_url": response.get("replay_url"),
+        "replay_state": response.get("replay_state"),
         "league": response.get("leagueid") or league.get("leagueid"),
         "league_name": league.get("name"),
         "duration": response.get("duration"),
@@ -136,13 +138,17 @@ def get_replay(match_id: int) -> tuple[bytes, dict[str, Any]] | None:
         match_data["cluster"] = cluster = gc_data.get("cluster")
         match_data["salt"] = salt = gc_data.get("salt")
         match_data["replay_url"] = gc_data.get("replay_url")
+        match_data["replay_state"] = gc_data.get("replay_state")
+
+    if match_data.get("replay_state") == "expired":
+        raise ReplayUnavailableError(REPLAY_DELETED_ERROR)
 
     url = match_data.get("replay_url")
     if not url and cluster is not None and salt is not None:
         url = replay_url(match_id, cluster, salt)
     if not url:
         logger.warning("OpenDota has no replay location for match %s", match_id)
-        raise ReplayUnavailableError(f"Replay {match_id} is no longer available")
+        return None
 
     try:
         response = requests.get(url, timeout=10)
@@ -150,9 +156,9 @@ def get_replay(match_id: int) -> tuple[bytes, dict[str, Any]] | None:
         logger.exception("Unable to download replay for match %s", match_id)
         return None
 
-    if response.status_code == 404:
+    if response.status_code in (404, 410):
         logger.warning("Replay for match %s is no longer available from Valve", match_id)
-        raise ReplayUnavailableError(f"Replay {match_id} is no longer available")
+        raise ReplayUnavailableError(REPLAY_DELETED_ERROR)
     try:
         response.raise_for_status()
     except requests.RequestException:

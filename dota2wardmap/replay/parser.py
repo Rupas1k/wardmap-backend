@@ -5,6 +5,7 @@ from multiprocessing.queues import Queue
 
 from d2wm_parser import parse_replay
 
+from ..domain import REPLAY_DELETED_ERROR
 from .download import ReplayUnavailableError, get_replay
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ def download_and_parse_replay(match_id: int, result_queue: Queue) -> None:
     try:
         data = get_replay(match_id)
     except ReplayUnavailableError:
-        result_queue.put((match_id, None, "Replay could not be downloaded"))
+        result_queue.put((match_id, None, REPLAY_DELETED_ERROR))
 
         return
 

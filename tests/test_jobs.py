@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from flask import Flask
 
+from dota2wardmap.domain import REPLAY_DELETED_ERROR
 from dota2wardmap.extensions import db
 from dota2wardmap.jobs import claim_job, complete_job, fail_job
 from dota2wardmap.models import ReplayJob
@@ -68,3 +69,20 @@ def test_oldest_match_is_claimed_first():
 
         assert job is not None
         assert job.match_id == 100
+
+
+def test_deleted_replay_fails_without_retry():
+    app = create_test_app()
+    with app.app_context():
+        db.create_all()
+        db.session.add(ReplayJob(match_id=123))
+        db.session.commit()
+
+        job = claim_job(ReplayJob)
+        assert job is not None
+
+        fail_job(job, REPLAY_DELETED_ERROR)
+
+        assert job.status == "failed"
+        assert job.next_attempt_at is None
+        assert job.last_error == REPLAY_DELETED_ERROR
