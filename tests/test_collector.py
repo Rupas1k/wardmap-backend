@@ -76,7 +76,7 @@ def test_sync_player_discovers_and_deduplicates_matches(monkeypatch):
     app = Flask(__name__)
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
     db.init_app(app)
-    monkeypatch.setattr(collector.dota_gc, "get_player_matches", lambda account_id: [100, 101])
+    monkeypatch.setattr(collector.dota_gc, "get_player_matches", lambda account_id, **kwargs: [101, 100])
 
     with app.app_context():
         db.create_all()
@@ -122,7 +122,7 @@ def test_sync_player_reports_terminal_jobs_without_requeueing(monkeypatch):
     app = Flask(__name__)
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
     db.init_app(app)
-    monkeypatch.setattr(collector.dota_gc, "get_player_matches", lambda account_id: [100, 101])
+    monkeypatch.setattr(collector.dota_gc, "get_player_matches", lambda account_id, **kwargs: [101, 100])
 
     with app.app_context():
         db.create_all()
@@ -142,3 +142,39 @@ def test_sync_player_reports_terminal_jobs_without_requeueing(monkeypatch):
     assert result.unavailable == 1
     assert result.failed == 1
     assert result.queued == 0
+
+
+def test_sync_player_stops_at_first_unavailable_replay(monkeypatch):
+    app = Flask(__name__)
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
+    db.init_app(app)
+    calls = []
+
+    def get_player_matches(account_id, *, start_at_match_id=None, limit=20):
+        calls.append(start_at_match_id)
+        if start_at_match_id is None:
+            return list(range(120, 100, -1))
+        if start_at_match_id == 100:
+            return [100, 99, 98]
+        raise AssertionError(f"unexpected cursor {start_at_match_id}")
+
+    monkeypatch.setattr(collector.dota_gc, "get_player_matches", get_player_matches)
+
+    with app.app_context():
+        db.create_all()
+        unavailable = ReplayJob(99)
+        unavailable.status = JobStatus.FAILED
+        unavailable.last_error = "Replay could not be downloaded"
+        db.session.add_all(
+            [Player(42), TrackedPlayer(42), unavailable, *(Match(match_id) for match_id in range(101, 121))]
+        )
+        db.session.commit()
+
+        result = collector.sync_player(42)
+
+        assert db.session.get(ReplayJob, 98) is None
+
+    assert calls == [None, 100]
+    assert result.matches == 22
+    assert result.unavailable == 1
+    assert result.history[-1] == {"match_id": 99, "status": "unavailable"}

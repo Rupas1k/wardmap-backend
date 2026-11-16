@@ -37,23 +37,66 @@ def sync_player(account_id: int) -> PlayerSyncResult:
     if tracked is None:
         raise ValueError(f"Player {account_id} is not tracked")
 
-    match_ids = set(dota_gc.get_player_matches(account_id))
-    parsed_ids = set(db.session.execute(select(Match.id).where(Match.id.in_(match_ids))).scalars().all())
-    existing_jobs = db.session.execute(select(ReplayJob).where(ReplayJob.match_id.in_(match_ids))).scalars().all()
-    existing_job_ids = {job.match_id for job in existing_jobs}
-    queued_ids = match_ids - parsed_ids - existing_job_ids
+    match_ids: set[int] = set()
+    parsed_ids: set[int] = set()
+    queued_ids: set[int] = set()
+    jobs_by_match_id: dict[int, ReplayJob] = {}
+    start_at_match_id: int | None = None
+    reached_unavailable = False
 
-    if queued_ids:
-        db.session.execute(
-            insert(ReplayJob).values([{"match_id": match_id} for match_id in queued_ids]).on_conflict_do_nothing()
+    while True:
+        page = dota_gc.get_player_matches(account_id, start_at_match_id=start_at_match_id)
+        if not page:
+            break
+
+        page_ids = set(page)
+        page_parsed_ids = set(db.session.execute(select(Match.id).where(Match.id.in_(page_ids))).scalars().all())
+        page_jobs = db.session.execute(select(ReplayJob).where(ReplayJob.match_id.in_(page_ids))).scalars().all()
+        page_jobs_by_match_id = {job.match_id: job for job in page_jobs}
+
+        available_page = []
+        for match_id in page:
+            job = page_jobs_by_match_id.get(match_id)
+            available_page.append(match_id)
+            replay_unavailable = (
+                job is not None
+                and job.status == JobStatus.FAILED
+                and job.last_error == "Replay could not be downloaded"
+            )
+            if replay_unavailable:
+                reached_unavailable = True
+                break
+
+        available_ids = set(available_page)
+        new_ids = available_ids - page_parsed_ids - set(page_jobs_by_match_id)
+        if new_ids:
+            db.session.execute(
+                insert(ReplayJob).values([{"match_id": match_id} for match_id in new_ids]).on_conflict_do_nothing()
+            )
+
+        match_ids.update(available_ids)
+        parsed_ids.update(page_parsed_ids & available_ids)
+        queued_ids.update(new_ids)
+        jobs_by_match_id.update(
+            (match_id, job) for match_id, job in page_jobs_by_match_id.items() if match_id in available_ids
         )
+
+        awaiting_replay = new_ids or any(
+            job.status in (JobStatus.PENDING, JobStatus.PROCESSING)
+            for match_id, job in page_jobs_by_match_id.items()
+            if match_id in available_ids
+        )
+        if reached_unavailable or awaiting_replay or len(page) < 20 or page[-1] <= 1:
+            break
+
+        start_at_match_id = page[-1] - 1
 
     now = datetime.now(UTC)
     tracked.last_match_id = max(match_ids, default=tracked.last_match_id)
     tracked.last_checked_at = now
     tracked.last_error = None
 
-    if queued_ids:
+    if queued_ids or any(job.status in (JobStatus.PENDING, JobStatus.PROCESSING) for job in jobs_by_match_id.values()):
         tracked.consecutive_empty_checks = 0
         tracked.next_check_at = now + timedelta(minutes=5)
     else:
@@ -63,7 +106,7 @@ def sync_player(account_id: int) -> PlayerSyncResult:
 
     db.session.commit()
 
-    unparsed_jobs = [job for job in existing_jobs if job.match_id not in parsed_ids]
+    unparsed_jobs = [job for job in jobs_by_match_id.values() if job.match_id not in parsed_ids]
     unavailable = sum(
         job.status == JobStatus.FAILED and job.last_error == "Replay could not be downloaded"
         for job in unparsed_jobs
@@ -73,7 +116,6 @@ def sync_player(account_id: int) -> PlayerSyncResult:
         for job in unparsed_jobs
     )
     pending = len(unparsed_jobs) - unavailable - failed
-    jobs_by_match_id = {job.match_id: job for job in existing_jobs}
     history = []
     for match_id in sorted(match_ids, reverse=True):
         job = jobs_by_match_id.get(match_id)

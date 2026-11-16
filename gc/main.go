@@ -338,7 +338,7 @@ func (s *gcService) playerMatches(response http.ResponseWriter, request *http.Re
 		return
 	}
 
-	limit := uint32(100)
+	limit := uint32(matchHistoryPageSize)
 	if value := request.URL.Query().Get("limit"); value != "" {
 		parsed, parseErr := parseUint32(value)
 		if parseErr != nil || parsed == 0 {
@@ -346,13 +346,23 @@ func (s *gcService) playerMatches(response http.ResponseWriter, request *http.Re
 
 			return
 		}
-		limit = min(parsed, 100)
+		limit = min(parsed, matchHistoryPageSize)
+	}
+	startAtMatchID := uint64(0)
+	if value := request.URL.Query().Get("start_at_match_id"); value != "" {
+		parsed, parseErr := strconv.ParseUint(value, 10, 64)
+		if parseErr != nil {
+			writeJSON(response, http.StatusBadRequest, map[string]string{"error": "Invalid match cursor"})
+
+			return
+		}
+		startAtMatchID = parsed
 	}
 
 	requestCtx, cancel := context.WithTimeout(request.Context(), s.config.requestTimeout)
 	defer cancel()
 
-	matches, err := s.playerMatchIDs(requestCtx, accountID, limit)
+	matches, err := s.playerMatchIDs(requestCtx, accountID, startAtMatchID, limit)
 	if err != nil {
 		writeGCError(response, err)
 
@@ -362,43 +372,32 @@ func (s *gcService) playerMatches(response http.ResponseWriter, request *http.Re
 	writeJSON(response, http.StatusOK, map[string]any{"matches": matches})
 }
 
-func (s *gcService) playerMatchIDs(ctx context.Context, accountID uint32, limit uint32) ([]uint64, error) {
+func (s *gcService) playerMatchIDs(
+	ctx context.Context,
+	accountID uint32,
+	startAtMatchID uint64,
+	limit uint32,
+) ([]uint64, error) {
 	includePractice := false
 	includeCustom := false
-	startAtMatchID := uint64(0)
 	requestID := uint32(time.Now().UnixNano())
+	result, err := s.dota.GetPlayerMatchHistory(ctx, &protocol.CMsgDOTAGetPlayerMatchHistory{
+		AccountId:              &accountID,
+		StartAtMatchId:         &startAtMatchID,
+		MatchesRequested:       &limit,
+		RequestId:              &requestID,
+		IncludePracticeMatches: &includePractice,
+		IncludeCustomGames:     &includeCustom,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	matches := make([]uint64, 0, limit)
-
-	for uint32(len(matches)) < limit {
-		pageSize := min(matchHistoryPageSize, limit-uint32(len(matches)))
-		result, err := s.dota.GetPlayerMatchHistory(ctx, &protocol.CMsgDOTAGetPlayerMatchHistory{
-			AccountId:              &accountID,
-			StartAtMatchId:         &startAtMatchID,
-			MatchesRequested:       &pageSize,
-			RequestId:              &requestID,
-			IncludePracticeMatches: &includePractice,
-			IncludeCustomGames:     &includeCustom,
-		})
-		if err != nil {
-			return nil, err
+	for _, match := range result.GetMatches() {
+		if matchID := match.GetMatchId(); matchID != 0 {
+			matches = append(matches, matchID)
 		}
-
-		page := result.GetMatches()
-		for _, match := range page {
-			if matchID := match.GetMatchId(); matchID != 0 {
-				matches = append(matches, matchID)
-			}
-		}
-		if uint32(len(page)) < pageSize || len(matches) == 0 {
-			break
-		}
-
-		lastMatchID := page[len(page)-1].GetMatchId()
-		if lastMatchID <= 1 {
-			break
-		}
-		startAtMatchID = lastMatchID - 1
-		requestID++
 	}
 
 	return matches, nil

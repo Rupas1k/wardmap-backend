@@ -33,8 +33,12 @@ def _get(path: str) -> dict[str, Any]:
     return payload
 
 
-def get_player_matches(account_id: int, limit: int = 100) -> list[int]:
-    payload = _get(f"/players/{account_id}/matches?limit={limit}")
+def get_player_matches(account_id: int, *, start_at_match_id: int | None = None, limit: int = 20) -> list[int]:
+    path = f"/players/{account_id}/matches?limit={limit}"
+    if start_at_match_id is not None:
+        path += f"&start_at_match_id={start_at_match_id}"
+
+    payload = _get(path)
     matches = payload.get("matches")
 
     if not isinstance(matches, list) or not all(isinstance(match_id, int) for match_id in matches):
