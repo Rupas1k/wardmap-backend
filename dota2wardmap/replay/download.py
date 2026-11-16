@@ -9,6 +9,10 @@ from ..integrations import dota_gc, opendota
 
 logger = logging.getLogger(__name__)
 
+
+class ReplayUnavailableError(RuntimeError):
+    pass
+
 _ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
 _CHINA_REPLAY_CLUSTERS = frozenset({413, 415, 417})
 
@@ -138,7 +142,7 @@ def get_replay(match_id: int) -> tuple[bytes, dict[str, Any]] | None:
         url = replay_url(match_id, cluster, salt)
     if not url:
         logger.warning("OpenDota has no replay location for match %s", match_id)
-        return None
+        raise ReplayUnavailableError(f"Replay {match_id} is no longer available")
 
     try:
         response = requests.get(url, timeout=10)
@@ -148,7 +152,7 @@ def get_replay(match_id: int) -> tuple[bytes, dict[str, Any]] | None:
 
     if response.status_code == 404:
         logger.warning("Replay for match %s is no longer available from Valve", match_id)
-        return None
+        raise ReplayUnavailableError(f"Replay {match_id} is no longer available")
     try:
         response.raise_for_status()
     except requests.RequestException:

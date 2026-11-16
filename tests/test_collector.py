@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 from flask import Flask
 
 from dota2wardmap.domain import JobStatus
@@ -178,3 +180,24 @@ def test_sync_player_stops_at_first_unavailable_replay(monkeypatch):
     assert result.matches == 22
     assert result.unavailable == 1
     assert result.history[-1] == {"match_id": 99, "status": "unavailable"}
+
+
+def test_collector_schedules_active_players_on_startup():
+    app = Flask(__name__)
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
+    db.init_app(app)
+
+    with app.app_context():
+        db.create_all()
+        active = TrackedPlayer(42)
+        active.next_check_at = datetime.now(UTC) + timedelta(days=1)
+        paused = TrackedPlayer(43)
+        paused.tracking_status = "paused"
+        paused.next_check_at = None
+        db.session.add_all([Player(42), Player(43), active, paused])
+        db.session.commit()
+
+        assert collector.schedule_active_players_now() == 1
+        assert active.next_check_at is not None
+        assert active.next_check_at.replace(tzinfo=UTC) <= datetime.now(UTC)
+        assert paused.next_check_at is None

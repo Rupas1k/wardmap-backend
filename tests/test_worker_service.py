@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from queue import Queue
 
 from flask import Flask
@@ -42,3 +43,24 @@ def test_result_failure_requeues_job_and_releases_worker(monkeypatch):
         assert job.status == "pending"
         assert job.next_attempt_at is not None
         assert job.last_error == "database unavailable"
+
+
+def test_worker_recovers_unparsed_jobs_on_startup():
+    app = create_test_app()
+
+    with app.app_context():
+        db.create_all()
+        pending = ReplayJob(match_id=123)
+        pending.next_attempt_at = datetime.now(UTC) + timedelta(hours=1)
+        processing = ReplayJob(match_id=124)
+        processing.status = "processing"
+        processing.claimed_at = datetime.now(UTC)
+        db.session.add_all([pending, processing])
+        db.session.commit()
+
+        assert worker_service.recover_unparsed_jobs() == 2
+        assert pending.status == "pending"
+        assert pending.next_attempt_at is not None
+        assert pending.next_attempt_at.replace(tzinfo=UTC) <= datetime.now(UTC)
+        assert processing.status == "pending"
+        assert processing.claimed_at is None

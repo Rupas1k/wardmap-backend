@@ -28,7 +28,7 @@ def claim_job(model: type[ReplayJob]) -> ReplayJob | None:
         ),
     ]
     job = db.session.execute(
-        select(model).where(*conditions).order_by(model.created_at).with_for_update(skip_locked=True).limit(1)
+        select(model).where(*conditions).order_by(model.match_id).with_for_update(skip_locked=True).limit(1)
     ).scalar_one_or_none()
     if job is None:
         db.session.rollback()

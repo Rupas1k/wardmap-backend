@@ -5,7 +5,7 @@ from multiprocessing.queues import Queue
 
 from d2wm_parser import parse_replay
 
-from .download import get_replay
+from .download import ReplayUnavailableError, get_replay
 
 logger = logging.getLogger(__name__)
 STEAM_ID64_BASE = 76561197960265728
@@ -80,9 +80,16 @@ def parse_wards(replay: bytes) -> list[dict[str, object]]:
 
 
 def download_and_parse_replay(match_id: int, result_queue: Queue) -> None:
-    data = get_replay(match_id)
-    if not data:
+    try:
+        data = get_replay(match_id)
+    except ReplayUnavailableError:
         result_queue.put((match_id, None, "Replay could not be downloaded"))
+
+        return
+
+    if not data:
+        result_queue.put((match_id, None, "Replay download failed"))
+
         return
 
     replay, match_data = data

@@ -1,8 +1,12 @@
 import logging
 import os
+from datetime import UTC, datetime
 from multiprocessing import Process, Queue
 from queue import Empty
 
+from sqlalchemy import select
+
+from ..domain import JobStatus
 from ..extensions import db
 from ..jobs import claim_job, complete_job, fail_job
 from ..lifecycle import install_shutdown_handlers
@@ -13,6 +17,26 @@ from .persistence import persist_parsed_replay
 logger = logging.getLogger(__name__)
 
 
+def recover_unparsed_jobs() -> int:
+    jobs = (
+        db.session.execute(
+            select(ReplayJob).where(ReplayJob.status.in_((JobStatus.PENDING, JobStatus.PROCESSING)))
+        )
+        .scalars()
+        .all()
+    )
+    now = datetime.now(UTC)
+
+    for job in jobs:
+        job.status = JobStatus.PENDING
+        job.claimed_at = None
+        job.next_attempt_at = now
+
+    db.session.commit()
+
+    return len(jobs)
+
+
 def run_replay_worker() -> None:
     shutdown = install_shutdown_handlers(logger)
     worker_count = max(1, int(os.getenv("PARSER_WORKERS", "2")))
@@ -21,6 +45,8 @@ def run_replay_worker() -> None:
     processes: list[Process] = []
     assignments: dict[int, int] = {}
 
+    recovered = recover_unparsed_jobs()
+    logger.info("Replay catch-up scheduled: %s unparsed jobs", recovered)
     logger.info("Starting replay parser with %s child processes", worker_count)
 
     for index in range(worker_count):

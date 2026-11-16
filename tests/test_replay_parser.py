@@ -1,4 +1,5 @@
 import bz2
+from queue import Queue
 
 from flask import Flask
 from sqlalchemy import select
@@ -17,8 +18,9 @@ from dota2wardmap.models import (
     WardSightingSegment,
     players_matches,
 )
+from dota2wardmap.replay import parser
+from dota2wardmap.replay.download import ReplayUnavailableError, get_replay
 from dota2wardmap.replay.download import decompress_replay_archive as _decompress_replay_archive
-from dota2wardmap.replay.download import get_replay
 from dota2wardmap.replay.persistence import _measurement_values, persist_parsed_replay
 from dota2wardmap.settings import get_settings
 
@@ -99,6 +101,21 @@ def test_get_replay_prefers_opendota_replay_url_without_salt(monkeypatch):
     assert replay == b"replay"
     assert requested_urls == [(opendota_url, 10)]
     assert match_data is not None and match_data["replay_url"] == opendota_url
+
+
+def test_parser_only_marks_confirmed_expiration_as_unavailable(monkeypatch):
+    result_queue = Queue()
+
+    monkeypatch.setattr(parser, "get_replay", lambda _match_id: None)
+    parser.download_and_parse_replay(123, result_queue)
+    assert result_queue.get() == (123, None, "Replay download failed")
+
+    def unavailable(_match_id):
+        raise ReplayUnavailableError("expired")
+
+    monkeypatch.setattr(parser, "get_replay", unavailable)
+    parser.download_and_parse_replay(124, result_queue)
+    assert result_queue.get() == (124, None, "Replay could not be downloaded")
 
 
 def test_persist_parsed_replay_persists_opendota_participants():

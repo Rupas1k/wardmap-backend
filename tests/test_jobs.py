@@ -55,3 +55,16 @@ def test_failed_replay_job_waits_before_retry():
         retried = claim_job(ReplayJob)
         assert retried is not None
         assert retried.attempts == 2
+
+
+def test_oldest_match_is_claimed_first():
+    app = create_test_app()
+    with app.app_context():
+        db.create_all()
+        db.session.add_all([ReplayJob(match_id=200), ReplayJob(match_id=100)])
+        db.session.commit()
+
+        job = claim_job(ReplayJob)
+
+        assert job is not None
+        assert job.match_id == 100

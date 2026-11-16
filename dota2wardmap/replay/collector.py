@@ -32,6 +32,20 @@ class PlayerSyncResult:
         return asdict(self)
 
 
+def schedule_active_players_now() -> int:
+    players = (
+        db.session.execute(select(TrackedPlayer).where(TrackedPlayer.tracking_status == "active")).scalars().all()
+    )
+    now = datetime.now(UTC)
+
+    for player in players:
+        player.next_check_at = now
+
+    db.session.commit()
+
+    return len(players)
+
+
 def sync_player(account_id: int) -> PlayerSyncResult:
     tracked = db.session.get(TrackedPlayer, account_id)
     if tracked is None:
@@ -230,6 +244,8 @@ def run_collector() -> None:
     cleanup_interval = settings.job_cleanup_interval_seconds
     next_cleanup = 0.0
     logger.info("League collector is ready; PostgreSQL tracking state is authoritative")
+    players_scheduled = schedule_active_players_now()
+    logger.info("Player catch-up scheduled: %s active players", players_scheduled)
     refreshed = refresh_missing_league_metadata()
     logger.info("League metadata refresh complete: updated %s leagues", refreshed)
     teams_refreshed, team_failures = refresh_stale_team_metadata()
@@ -280,7 +296,7 @@ def run_collector() -> None:
                 tracked = db.session.get(TrackedPlayer, account_id)
                 if tracked is not None:
                     tracked.last_checked_at = now
-                    tracked.next_check_at = now + timedelta(minutes=15)
+                    tracked.next_check_at = now + timedelta(minutes=1)
                     tracked.last_error = str(exc)[:512]
                     db.session.commit()
                 logger.exception("Unable to synchronize player %s", account_id)
