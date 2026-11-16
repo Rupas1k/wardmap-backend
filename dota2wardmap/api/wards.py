@@ -136,6 +136,11 @@ def ward_evidence(ward_id: int):
     if ward is None:
         raise NotFound("Ward not found")
 
+    return ward_evidence_payload(ward)
+
+
+def ward_evidence_payload(ward: Ward) -> dict[str, Any]:
+
     rows = db.session.execute(
         select(
             FreshSightingEvent,
@@ -144,7 +149,7 @@ def ward_evidence(ward_id: int):
         )
         .join(WardFreshSightingCredit, WardFreshSightingCredit.event_id == FreshSightingEvent.id)
         .outerjoin(Player, Player.id == FreshSightingEvent.target_player_id)
-        .where(WardFreshSightingCredit.ward_id == ward_id)
+        .where(WardFreshSightingCredit.ward_id == ward.id)
         .order_by(FreshSightingEvent.time_seconds, FreshSightingEvent.id)
     ).all()
     event_ids = [event.id for event, _, _ in rows]
@@ -154,7 +159,7 @@ def ward_evidence(ward_id: int):
             select(WardSightingSegment)
             .where(
                 WardSightingSegment.event_id.in_(event_ids),
-                WardSightingSegment.ward_id == ward_id,
+                WardSightingSegment.ward_id == ward.id,
             )
             .order_by(
                 WardSightingSegment.event_id,
@@ -171,7 +176,7 @@ def ward_evidence(ward_id: int):
             select(FreshSightingRoutePoint)
             .where(
                 FreshSightingRoutePoint.event_id.in_(event_ids),
-                FreshSightingRoutePoint.ward_id == ward_id,
+                FreshSightingRoutePoint.ward_id == ward.id,
             )
             .order_by(
                 FreshSightingRoutePoint.event_id,
