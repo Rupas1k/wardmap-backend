@@ -25,6 +25,9 @@ class Settings:
     opendota_api_url: str
     opendota_api_key: str | None
     opendota_timeout: float
+    dota_gc_url: str | None
+    dota_gc_token: str | None
+    dota_gc_timeout: float
     log_level: str
     cors_origins: tuple[str, ...]
     parser_workers: int
@@ -54,10 +57,13 @@ class Settings:
         )
         try:
             opendota_timeout = float(os.getenv("OPENDOTA_TIMEOUT", "30"))
+            dota_gc_timeout = float(os.getenv("DOTA_GC_TIMEOUT", "30"))
         except ValueError as exc:
-            raise RuntimeError("OPENDOTA_TIMEOUT must be numeric") from exc
+            raise RuntimeError("OPENDOTA_TIMEOUT and DOTA_GC_TIMEOUT must be numeric") from exc
         if opendota_timeout <= 0:
             raise RuntimeError("OPENDOTA_TIMEOUT must be greater than zero")
+        if dota_gc_timeout <= 0:
+            raise RuntimeError("DOTA_GC_TIMEOUT must be greater than zero")
 
         return cls(
             database_url=database_url,
@@ -65,6 +71,9 @@ class Settings:
             opendota_api_url=os.getenv("OPENDOTA_API_URL", "https://api.opendota.com/api").rstrip("/"),
             opendota_api_key=os.getenv("OPENDOTA_API_KEY") or None,
             opendota_timeout=opendota_timeout,
+            dota_gc_url=(os.getenv("DOTA_GC_URL") or "").rstrip("/") or None,
+            dota_gc_token=os.getenv("DOTA_GC_TOKEN") or None,
+            dota_gc_timeout=dota_gc_timeout,
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             cors_origins=origins,
             parser_workers=_integer("PARSER_WORKERS", 2, minimum=1),

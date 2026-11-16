@@ -9,6 +9,9 @@ x-backend: &backend
     OPENDOTA_API_KEY: ${OPENDOTA_API_KEY:-}
     OPENDOTA_API_URL: ${OPENDOTA_API_URL:-https://api.opendota.com/api}
     OPENDOTA_TIMEOUT: ${OPENDOTA_TIMEOUT:-30}
+    DOTA_GC_URL: http://dota-gc:5700
+    DOTA_GC_TOKEN: ${DOTA_GC_TOKEN:-}
+    DOTA_GC_TIMEOUT: ${DOTA_GC_TIMEOUT:-30}
     LOG_LEVEL: ${LOG_LEVEL:-INFO}
     PARSER_WORKERS: ${PARSER_WORKERS:-4}
     COLLECTOR_INTERVAL_SECONDS: ${COLLECTOR_INTERVAL_SECONDS:-300}
@@ -27,6 +30,24 @@ x-backend: &backend
     RUST_BACKTRACE: "full"
 
 services:
+  dota-gc:
+    build: ./gc
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      STEAM_USERNAME: ${STEAM_USERNAME:?Set STEAM_USERNAME for the Dota GC account}
+      STEAM_PASSWORD: ${STEAM_PASSWORD:-}
+      STEAM_ACCESS_TOKEN: ${STEAM_ACCESS_TOKEN:-}
+      STEAM_AUTH_CODE: ${STEAM_AUTH_CODE:-}
+      STEAM_TFA_CODE: ${STEAM_TFA_CODE:-}
+      DOTA_GC_TOKEN: ${DOTA_GC_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "/dota-gc", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   api:
     <<: *backend
     restart: unless-stopped
