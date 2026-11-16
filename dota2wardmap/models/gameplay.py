@@ -29,6 +29,7 @@ players_matches = db.Table(
     Column("player_id", BigInteger, ForeignKey("players.id"), primary_key=True),
     Column("match_id", BigInteger, ForeignKey("matches.id"), primary_key=True),
     Column("is_radiant", Boolean),
+    Column("hero_name", String(96)),
     Index("ix_players_matches_opponent_lookup", "match_id", "is_radiant", "player_id"),
 )
 
@@ -198,6 +199,27 @@ class Player(db.Model):
     def __init__(self, id: int, name: str | None = None) -> None:
         self.id = id
         self.name = name
+
+
+class TrackedPlayer(db.Model):
+    __tablename__ = "tracked_players"
+    __table_args__ = (
+        CheckConstraint("tracking_status IN ('active', 'paused')", name="ck_tracked_players_status"),
+        Index("ix_tracked_players_schedule", "tracking_status", "next_check_at"),
+    )
+
+    account_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("players.id"), primary_key=True)
+    tracking_status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    last_match_id: Mapped[int | None] = mapped_column(BigInteger)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consecutive_empty_checks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(String(512))
+
+    player: Mapped[Player] = relationship()
+
+    def __init__(self, account_id: int) -> None:
+        self.account_id = account_id
 
 
 class FreshSightingEvent(db.Model):

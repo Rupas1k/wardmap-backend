@@ -5,7 +5,7 @@ from typing import Any
 
 import requests
 
-from ..integrations import opendota
+from ..integrations import dota_gc, opendota
 
 logger = logging.getLogger(__name__)
 
@@ -91,13 +91,47 @@ def get_match_data(match_id: int) -> dict[str, Any]:
     }
 
 
+def get_gc_match_data(match_id: int) -> dict[str, Any]:
+    response = dota_gc.get_match(match_id)
+
+    return {
+        "cluster": response.get("cluster"),
+        "salt": response.get("replay_salt"),
+        "replay_url": response.get("replay_url"),
+        "league": response.get("league_id"),
+        "league_name": None,
+        "duration": response.get("duration"),
+        "region": response.get("region"),
+        "date": response.get("start_time"),
+        "version": None,
+        "radiant_team": {"id": None, "name": None, "tag": None, "logo_url": None},
+        "dire_team": {"id": None, "name": None, "tag": None, "logo_url": None},
+        "radiant_win": response.get("radiant_win"),
+        "players": response.get("players") or [],
+    }
+
+
 def get_replay(match_id: int) -> tuple[bytes, dict[str, Any]] | None:
     try:
         match_data = get_match_data(match_id)
-        cluster, salt = match_data.get("cluster"), match_data.get("salt")
     except opendota.OpenDotaError:
-        logger.exception("Invalid OpenDota response for match %s", match_id)
-        return None
+        logger.warning("OpenDota metadata unavailable for match %s; trying Dota GC", match_id)
+        try:
+            match_data = get_gc_match_data(match_id)
+        except dota_gc.DotaGCError:
+            logger.exception("No metadata provider returned match %s", match_id)
+            return None
+
+    cluster, salt = match_data.get("cluster"), match_data.get("salt")
+
+    if not match_data.get("replay_url") and (cluster is None or salt is None):
+        try:
+            gc_data = get_gc_match_data(match_id)
+        except dota_gc.DotaGCError:
+            gc_data = {}
+        match_data["cluster"] = cluster = gc_data.get("cluster")
+        match_data["salt"] = salt = gc_data.get("salt")
+        match_data["replay_url"] = gc_data.get("replay_url")
 
     url = match_data.get("replay_url")
     if not url and cluster is not None and salt is not None:

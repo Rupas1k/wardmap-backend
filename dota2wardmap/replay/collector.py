@@ -1,5 +1,6 @@
 import logging
 import time
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -7,14 +8,97 @@ from sqlalchemy.dialects.postgresql import insert
 
 from ..domain import JobStatus
 from ..extensions import db
-from ..integrations import opendota
+from ..integrations import dota_gc, opendota
 from ..job_maintenance import cleanup_terminal_jobs
 from ..lifecycle import install_shutdown_handlers
-from ..models import League, Match, ReplayJob
+from ..models import League, Match, ReplayJob, TrackedPlayer
 from ..settings import get_settings
 from ..team_metadata import refresh_stale_team_metadata
 
 logger = logging.getLogger("dota2wardmap.replay.collector")
+
+
+@dataclass(frozen=True)
+class PlayerSyncResult:
+    matches: int
+    queued: int
+    parsed: int
+    pending: int
+    unavailable: int
+    failed: int
+    history: list[dict[str, int | str]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+def sync_player(account_id: int) -> PlayerSyncResult:
+    tracked = db.session.get(TrackedPlayer, account_id)
+    if tracked is None:
+        raise ValueError(f"Player {account_id} is not tracked")
+
+    match_ids = set(dota_gc.get_player_matches(account_id))
+    parsed_ids = set(db.session.execute(select(Match.id).where(Match.id.in_(match_ids))).scalars().all())
+    existing_jobs = db.session.execute(select(ReplayJob).where(ReplayJob.match_id.in_(match_ids))).scalars().all()
+    existing_job_ids = {job.match_id for job in existing_jobs}
+    queued_ids = match_ids - parsed_ids - existing_job_ids
+
+    if queued_ids:
+        db.session.execute(
+            insert(ReplayJob).values([{"match_id": match_id} for match_id in queued_ids]).on_conflict_do_nothing()
+        )
+
+    now = datetime.now(UTC)
+    tracked.last_match_id = max(match_ids, default=tracked.last_match_id)
+    tracked.last_checked_at = now
+    tracked.last_error = None
+
+    if queued_ids:
+        tracked.consecutive_empty_checks = 0
+        tracked.next_check_at = now + timedelta(minutes=5)
+    else:
+        tracked.consecutive_empty_checks += 1
+        delay = timedelta(hours=1) if tracked.consecutive_empty_checks >= 3 else timedelta(minutes=15)
+        tracked.next_check_at = now + delay
+
+    db.session.commit()
+
+    unparsed_jobs = [job for job in existing_jobs if job.match_id not in parsed_ids]
+    unavailable = sum(
+        job.status == JobStatus.FAILED and job.last_error == "Replay could not be downloaded"
+        for job in unparsed_jobs
+    )
+    failed = sum(
+        job.status == JobStatus.FAILED and job.last_error != "Replay could not be downloaded"
+        for job in unparsed_jobs
+    )
+    pending = len(unparsed_jobs) - unavailable - failed
+    jobs_by_match_id = {job.match_id: job for job in existing_jobs}
+    history = []
+    for match_id in sorted(match_ids, reverse=True):
+        job = jobs_by_match_id.get(match_id)
+        if job is not None and job.status in (JobStatus.PENDING, JobStatus.PROCESSING):
+            status = job.status
+        elif match_id in parsed_ids:
+            status = "parsed"
+        elif match_id in queued_ids or job is None:
+            status = "queued"
+        elif job.status == JobStatus.FAILED and job.last_error == "Replay could not be downloaded":
+            status = "unavailable"
+        else:
+            status = job.status
+
+        history.append({"match_id": match_id, "status": status})
+
+    return PlayerSyncResult(
+        matches=len(match_ids),
+        queued=len(queued_ids),
+        parsed=len(parsed_ids),
+        pending=pending,
+        unavailable=unavailable,
+        failed=failed,
+        history=history,
+    )
 
 
 def sync_league(league_id: int, *, refresh_unparsed_jobs: bool = False) -> tuple[int, int]:
@@ -124,6 +208,41 @@ def run_collector() -> None:
             next_cleanup = time.monotonic() + cleanup_interval
 
         now = datetime.now(UTC)
+        player_ids = (
+            db.session.execute(
+                select(TrackedPlayer.account_id)
+                .where(
+                    TrackedPlayer.tracking_status == "active",
+                    (TrackedPlayer.next_check_at.is_(None)) | (TrackedPlayer.next_check_at <= now),
+                )
+                .order_by(TrackedPlayer.next_check_at.asc().nullsfirst(), TrackedPlayer.account_id)
+            )
+            .scalars()
+            .all()
+        )
+        for account_id in player_ids:
+            if shutdown.is_set():
+                break
+            try:
+                result = sync_player(account_id)
+                logger.info(
+                    "Player %s: queued %s of %s recent matches; %s parsed, %s unavailable",
+                    account_id,
+                    result.queued,
+                    result.matches,
+                    result.parsed,
+                    result.unavailable,
+                )
+            except (dota_gc.DotaGCError, ValueError) as exc:
+                db.session.rollback()
+                tracked = db.session.get(TrackedPlayer, account_id)
+                if tracked is not None:
+                    tracked.last_checked_at = now
+                    tracked.next_check_at = now + timedelta(minutes=15)
+                    tracked.last_error = str(exc)[:512]
+                    db.session.commit()
+                logger.exception("Unable to synchronize player %s", account_id)
+
         league_ids = (
             db.session.execute(
                 select(League.id)

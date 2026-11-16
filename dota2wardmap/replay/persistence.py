@@ -151,6 +151,7 @@ def persist_parsed_replay(result: ParsedReplay) -> bool:
             else:
                 logger.warning("Parsed match %s contains no wards", match_id)
         else:
+            _attach_players(match, match_data, parsed_wards)
             updated = _update_existing_measurements(match_id, parsed_wards)
             logger.info("Match %s is already parsed; updated %s measurements", match_id, updated)
 
@@ -337,6 +338,7 @@ def apply_match_team_data(match: Match, match_data: dict[str, Any]) -> None:
 
 def _attach_players(match: Match, match_data: dict[str, Any], wards: list[dict[str, Any]]) -> None:
     player_names = {player["id"]: player.get("name") for player in match_data.get("players", [])}
+    player_heroes = {player["id"]: player.get("hero_name") for player in match_data.get("players", [])}
     player_sides = {
         player["id"]: player.get("is_radiant")
         for player in match_data.get("players", [])
@@ -373,15 +375,32 @@ def _attach_players(match: Match, match_data: dict[str, Any], wards: list[dict[s
 
     db.session.flush()
 
-    if player_ids:
+    existing_links = set(
         db.session.execute(
-            players_matches.insert(),
-            [
-                {
-                    "player_id": player_id,
-                    "match_id": match.id,
-                    "is_radiant": player_sides.get(player_id),
-                }
-                for player_id in player_ids
-            ],
-        )
+            select(players_matches.c.player_id).where(
+                players_matches.c.match_id == match.id,
+                players_matches.c.player_id.in_(player_ids),
+            )
+        ).scalars()
+    )
+    for player_id in player_ids:
+        values = {}
+        if player_id in player_sides:
+            values["is_radiant"] = player_sides[player_id]
+        if player_id in player_heroes and player_heroes[player_id] is not None:
+            values["hero_name"] = player_heroes[player_id]
+
+        if player_id in existing_links:
+            if values:
+                db.session.execute(
+                    players_matches.update()
+                    .where(
+                        players_matches.c.match_id == match.id,
+                        players_matches.c.player_id == player_id,
+                    )
+                    .values(**values)
+                )
+        else:
+            db.session.execute(
+                players_matches.insert().values(player_id=player_id, match_id=match.id, **values)
+            )

@@ -15,6 +15,7 @@ from dota2wardmap.models import (
     Ward,
     WardFreshSightingCredit,
     WardSightingSegment,
+    players_matches,
 )
 from dota2wardmap.replay.download import decompress_replay_archive as _decompress_replay_archive
 from dota2wardmap.replay.download import get_replay
@@ -118,7 +119,14 @@ def test_persist_parsed_replay_persists_opendota_participants():
         "radiant_team": {"id": 10, "name": "Radiant Team", "tag": "RAD"},
         "dire_team": {"id": 20, "name": "Dire Team", "tag": "DIRE"},
         "radiant_win": True,
-        "players": [{"id": account_id, "name": "SumaiL-"}],
+        "players": [
+            {
+                "id": account_id,
+                "name": "SumaiL-",
+                "hero_name": "npc_dota_hero_invoker",
+                "is_radiant": True,
+            }
+        ],
     }
     ward_data = {
         "event": "expired",
@@ -199,6 +207,12 @@ def test_persist_parsed_replay_persists_opendota_participants():
             .scalars()
             .all()
         )
+        hero_name = db.session.execute(
+            select(players_matches.c.hero_name).where(
+                players_matches.c.match_id == match_id,
+                players_matches.c.player_id == account_id,
+            )
+        ).scalar_one()
 
         assert player is not None and player.name == "SumaiL-"
         assert match is not None and player in match.players
@@ -215,6 +229,7 @@ def test_persist_parsed_replay_persists_opendota_participants():
         assert radiant_team.metadata_updated_at is not None
         assert match.radiant_team_id == 10 and match.dire_team_id == 20
         assert match.radiant_win is True
+        assert hero_name == "npc_dota_hero_invoker"
         assert sighting.target_player_slot == 6
         assert sighting.target_steam_id == "76561197960265950"
         assert sighting.target_player_id == 222

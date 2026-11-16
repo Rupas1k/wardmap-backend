@@ -22,7 +22,9 @@ def cleanup_terminal_jobs(batch_size: int = DEFAULT_CLEANUP_BATCH_SIZE) -> int:
                 .where(
                     or_(
                         (ReplayJob.status == JobStatus.COMPLETED) & (ReplayJob.completed_at < cutoff),
-                        (ReplayJob.status == JobStatus.FAILED) & (ReplayJob.claimed_at < cutoff),
+                        (ReplayJob.status == JobStatus.FAILED)
+                        & (ReplayJob.claimed_at < cutoff)
+                        & (ReplayJob.last_error != "Replay could not be downloaded"),
                     )
                 )
                 .limit(batch_size)

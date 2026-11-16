@@ -25,7 +25,7 @@ def test_upgrade_creates_schema_from_single_baseline(monkeypatch, tmp_path):
 
     with engine.connect() as connection:
         version = connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one()
-    assert version == "c31d8e4f72a6"
+    assert version == "c42e7a91d5f0"
     ward_columns = {column["name"] for column in inspect(engine).get_columns("wards")}
     assert {
         "scouting_score",
@@ -36,6 +36,8 @@ def test_upgrade_creates_schema_from_single_baseline(monkeypatch, tmp_path):
         "measurement_evidence",
     } <= ward_columns
     assert "measurement" not in ward_columns
+    player_match_columns = {column["name"] for column in inspect(engine).get_columns("players_matches")}
+    assert "hero_name" in player_match_columns
 
 
 def test_scouting_upgrade_preserves_existing_wards_as_unmeasured(monkeypatch, tmp_path):

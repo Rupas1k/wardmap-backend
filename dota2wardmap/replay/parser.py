@@ -8,12 +8,34 @@ from d2wm_parser import parse_replay
 from .download import get_replay
 
 logger = logging.getLogger(__name__)
+STEAM_ID64_BASE = 76561197960265728
 
 
-def parse_wards(replay: bytes) -> list[dict[str, object]]:
-    output = parse_replay(replay).wards
+def _account_id(steam_id: int | None) -> int | None:
+    if steam_id is None:
+        return None
 
-    return [
+    account_id = steam_id - STEAM_ID64_BASE
+    if account_id <= 0 or account_id > 0xFFFFFFFF:
+        return None
+
+    return account_id
+
+
+def parse_replay_data(replay: bytes) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    output = parse_replay(replay)
+    players = [
+        {
+            "id": account_id,
+            "name": player.name,
+            "hero_name": player.hero_name,
+            "is_radiant": player.team == 2,
+        }
+        for player in output.metadata.players
+        if (account_id := _account_id(player.steam_id)) is not None and player.team in (2, 3)
+    ]
+
+    wards = [
         {
             "time_placed": item.time_placed,
             "duration": item.duration,
@@ -45,8 +67,16 @@ def parse_wards(replay: bytes) -> list[dict[str, object]]:
             "scouting_complete": item.scouting_complete,
             "measurement": json.loads(item.measurement_json) if item.measurement_json is not None else None,
         }
-        for item in output
+        for item in output.wards
     ]
+
+    return wards, players
+
+
+def parse_wards(replay: bytes) -> list[dict[str, object]]:
+    wards, _ = parse_replay_data(replay)
+
+    return wards
 
 
 def download_and_parse_replay(match_id: int, result_queue: Queue) -> None:
@@ -58,7 +88,8 @@ def download_and_parse_replay(match_id: int, result_queue: Queue) -> None:
     replay, match_data = data
     try:
         started_at = time.time()
-        output_dicts = parse_wards(replay)
+        output_dicts, replay_players = parse_replay_data(replay)
+        match_data["players"] = replay_players
 
         logger.info("Parsed match %s in %.3fs", match_id, time.time() - started_at)
         result_queue.put((match_id, (match_id, match_data, output_dicts), None))
