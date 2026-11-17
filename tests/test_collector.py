@@ -4,7 +4,7 @@ from flask import Flask
 
 from dota2wardmap.domain import REPLAY_DELETED_ERROR, JobStatus
 from dota2wardmap.extensions import db
-from dota2wardmap.models import League, Match, Player, ReplayJob, TrackedPlayer
+from dota2wardmap.models import League, Match, Player, ReplayJob, TrackedPlayer, players_matches
 from dota2wardmap.replay import collector
 
 
@@ -201,3 +201,37 @@ def test_collector_schedules_active_players_on_startup():
         assert active.next_check_at is not None
         assert active.next_check_at.replace(tzinfo=UTC) <= datetime.now(UTC)
         assert paused.next_check_at is None
+
+
+def test_stored_player_history_returns_parsed_matches_without_gc():
+    app = Flask(__name__)
+    app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite://"
+    db.init_app(app)
+
+    with app.app_context():
+        db.create_all()
+        db.session.add_all([Player(42), Match(100), Match(101)])
+        db.session.flush()
+        db.session.execute(
+            players_matches.insert(),
+            [
+                {"player_id": 42, "match_id": 100},
+                {"player_id": 42, "match_id": 101},
+            ],
+        )
+        db.session.commit()
+
+        result = collector.stored_player_history(42)
+
+    assert result.to_dict() == {
+        "matches": 2,
+        "queued": 0,
+        "parsed": 2,
+        "pending": 0,
+        "unavailable": 0,
+        "failed": 0,
+        "history": [
+            {"match_id": 101, "status": "parsed"},
+            {"match_id": 100, "status": "parsed"},
+        ],
+    }

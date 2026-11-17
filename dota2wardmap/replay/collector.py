@@ -11,7 +11,7 @@ from ..extensions import db
 from ..integrations import dota_gc, opendota
 from ..job_maintenance import cleanup_terminal_jobs
 from ..lifecycle import install_shutdown_handlers
-from ..models import League, Match, ReplayJob, TrackedPlayer
+from ..models import League, Match, ReplayJob, TrackedPlayer, players_matches
 from ..settings import get_settings
 from ..team_metadata import refresh_stale_team_metadata
 
@@ -42,6 +42,29 @@ def schedule_active_players_now() -> int:
     db.session.commit()
 
     return len(players)
+
+
+def stored_player_history(account_id: int) -> PlayerSyncResult:
+    match_ids = (
+        db.session.execute(
+            select(Match.id)
+            .join(players_matches, players_matches.c.match_id == Match.id)
+            .where(players_matches.c.player_id == account_id)
+            .order_by(Match.id.desc())
+        )
+        .scalars()
+        .all()
+    )
+
+    return PlayerSyncResult(
+        matches=len(match_ids),
+        queued=0,
+        parsed=len(match_ids),
+        pending=0,
+        unavailable=0,
+        failed=0,
+        history=[{"match_id": match_id, "status": "parsed"} for match_id in match_ids],
+    )
 
 
 def sync_player(account_id: int) -> PlayerSyncResult:

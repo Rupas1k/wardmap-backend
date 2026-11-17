@@ -9,7 +9,7 @@ from ..domain import AccessLevel
 from ..extensions import db
 from ..integrations import dota_gc
 from ..models import Match, Player, TrackedPlayer, Ward, players_matches
-from ..replay.collector import sync_player
+from ..replay.collector import stored_player_history, sync_player
 from .wards import integer_list
 
 bp = Blueprint("players", __name__)
@@ -98,9 +98,15 @@ def synchronize_tracked_player(account_id: int):
         result = sync_player(account_id)
     except ValueError as exc:
         raise BadRequest(str(exc)) from exc
-    except dota_gc.DotaGCError:
+    except dota_gc.DotaGCError as exc:
         db.session.rollback()
-        return {"error": "Dota Game Coordinator is temporarily unavailable"}, 502
+        tracked = db.session.get(TrackedPlayer, account_id)
+        if tracked is not None:
+            tracked.last_checked_at = datetime.now(UTC)
+            tracked.last_error = str(exc)[:512]
+            db.session.commit()
+
+        return stored_player_history(account_id).to_dict()
 
     return result.to_dict()
 
